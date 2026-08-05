@@ -28,8 +28,9 @@ app.get('/api/drivers', (req, res) => {
   for (const imei of db.active_drivers_list) {
     const val = db.drivers[imei];
     if (val) {
-      // Delete drivers offline for more than 5 minutes
-      if (Date.now() - val.lastTelemetryTime > 300000) {
+      // Delete drivers offline for more than 5 minutes (or 1 hour if stationary)
+      const maxOfflineTime = (val.speed > 0) ? 300000 : 3600000;
+      if (Date.now() - val.lastTelemetryTime > maxOfflineTime) {
         delete db.drivers[imei];
         listUpdated = true;
       } else {
