@@ -34,7 +34,11 @@ app.get('/api/drivers', (req, res) => {
         delete db.drivers[imei];
         listUpdated = true;
       } else {
-        drivers.push(val);
+        const lastSeenSecondsAgo = Math.max(0, Math.floor((Date.now() - val.lastTelemetryTime) / 1000));
+        drivers.push({
+          ...val,
+          lastSeenSecondsAgo
+        });
         updatedList.push(imei);
       }
     } else {
