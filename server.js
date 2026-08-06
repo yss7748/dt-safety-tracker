@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const { getUSRoadSpeedLimit } = require('./us_speed_engine');
 
 const app = express();
 const PORT = process.env.PORT || 5050;
@@ -44,6 +45,9 @@ app.get('/api/drivers', (req, res) => {
             val.extension.status = 'expired';
           }
         }
+
+        // Calculate US Road Speed Limit via Spatial Engine
+        val.roadSpeedLimit = getUSRoadSpeedLimit(val.lat, val.lng, val.speed, val.settings);
 
         drivers.push({
           ...val,
@@ -129,9 +133,8 @@ app.post('/api/telemetry', (req, res) => {
   driver.networkStatus = networkStatus || '4g';
   driver.lastTelemetryTime = Date.now();
 
-  if (req.body.roadSpeedLimit !== undefined) {
-    driver.roadSpeedLimit = req.body.roadSpeedLimit;
-  }
+  // Calculate Road Speed Limit using US Spatial Engine
+  driver.roadSpeedLimit = getUSRoadSpeedLimit(lat, lng, speed, driver.settings);
 
   if (violations) {
     driver.violations = {
