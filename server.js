@@ -209,7 +209,21 @@ app.post('/api/extension/respond', (req, res) => {
   if (!imei) return res.status(400).json({ error: 'Missing IMEI' });
 
   const driver = db.drivers[imei];
-  if (!driver || !driver.extension) return res.status(404).json({ error: 'No pending extension found' });
+  if (!driver) return res.status(404).json({ error: 'Driver not registered' });
+
+  if (status === 'exempt') {
+    driver.extension = {
+      status: 'exempt',
+      duration: 0,
+      reason: 'Exempted from breaks by coordinator',
+      responseTime: Date.now()
+    };
+    driver.status = 'active';
+    driver.violations.skippedLunch = false;
+    return res.json({ success: true, driver });
+  }
+
+  if (!driver.extension) return res.status(404).json({ error: 'No pending extension found' });
 
   driver.extension.status = status;
   driver.extension.responseTime = Date.now();
