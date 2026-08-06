@@ -248,7 +248,7 @@ app.post('/api/reset', (req, res) => {
 
 // POST /api/settings
 app.post('/api/settings', (req, res) => {
-  const { imei, speedLimit, lunchStartHour, lunchStartMinute, lunchDeadlineHour, lunchDeadlineMinute, periodicBreakMinutes } = req.body;
+  const { imei, speedLimit, lunchStartHour, lunchStartMinute, lunchDeadlineHour, lunchDeadlineMinute, periodicBreakMinutes, roadSpeedLimitOverride } = req.body;
   if (!imei) return res.status(400).json({ error: 'Missing IMEI' });
 
   const driver = db.drivers[imei];
@@ -260,10 +260,15 @@ app.post('/api/settings', (req, res) => {
     lunchStartMinute: parseInt(lunchStartMinute) || 0,
     lunchDeadlineHour: parseInt(lunchDeadlineHour) || 12,
     lunchDeadlineMinute: parseInt(lunchDeadlineMinute) || 30,
-    periodicBreakMinutes: parseInt(periodicBreakMinutes) || 120
+    periodicBreakMinutes: parseInt(periodicBreakMinutes) || 120,
+    roadSpeedLimitOverride: roadSpeedLimitOverride ? parseInt(roadSpeedLimitOverride) : 0
   };
 
-  res.json({ success: true, driver });
+  if (roadSpeedLimitOverride) {
+    driver.roadSpeedLimit = parseInt(roadSpeedLimitOverride);
+  }
+
+  res.json({ success: true, settings: driver.settings });
 });
 
 // POST /api/alert-driver
