@@ -35,6 +35,16 @@ app.get('/api/drivers', (req, res) => {
         listUpdated = true;
       } else {
         const lastSeenSecondsAgo = Math.max(0, Math.floor((Date.now() - val.lastTelemetryTime) / 1000));
+
+        if (val.extension && val.extension.status === 'approved' && val.extension.approvedTime) {
+          const elapsed = (Date.now() - val.extension.approvedTime) / 1000;
+          const totalDuration = (val.extension.approvedDuration || 15) * 60;
+          val.extension.remainingSeconds = Math.max(0, Math.floor(totalDuration - elapsed));
+          if (val.extension.remainingSeconds <= 0) {
+            val.extension.status = 'expired';
+          }
+        }
+
         drivers.push({
           ...val,
           lastSeenSecondsAgo
@@ -119,6 +129,10 @@ app.post('/api/telemetry', (req, res) => {
   driver.networkStatus = networkStatus || '4g';
   driver.lastTelemetryTime = Date.now();
 
+  if (req.body.roadSpeedLimit !== undefined) {
+    driver.roadSpeedLimit = req.body.roadSpeedLimit;
+  }
+
   if (violations) {
     driver.violations = {
       ...driver.violations,
@@ -128,6 +142,15 @@ app.post('/api/telemetry', (req, res) => {
 
   if (lastBrakeTime) {
     driver.lastBrakeTime = lastBrakeTime;
+  }
+
+  if (driver.extension && driver.extension.status === 'approved' && driver.extension.approvedTime) {
+    const elapsed = (Date.now() - driver.extension.approvedTime) / 1000;
+    const totalDuration = (driver.extension.approvedDuration || 15) * 60;
+    driver.extension.remainingSeconds = Math.max(0, Math.floor(totalDuration - elapsed));
+    if (driver.extension.remainingSeconds <= 0) {
+      driver.extension.status = 'expired';
+    }
   }
 
   res.json({ success: true, driver });
@@ -143,7 +166,7 @@ app.post('/api/violation', (req, res) => {
 
   const newLog = {
     id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-    timestamp: new Date().toLocaleTimeString('en-US', { timeZone: 'America/Chicago' }),
+    timestamp: new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' }),
     imei,
     driverName,
     type,
@@ -182,7 +205,7 @@ app.post('/api/extension/request', (req, res) => {
 
 // POST /api/extension/respond
 app.post('/api/extension/respond', (req, res) => {
-  const { imei, status } = req.body;
+  const { imei, status, approvedDuration } = req.body;
   if (!imei) return res.status(400).json({ error: 'Missing IMEI' });
 
   const driver = db.drivers[imei];
@@ -192,6 +215,8 @@ app.post('/api/extension/respond', (req, res) => {
   driver.extension.responseTime = Date.now();
 
   if (status === 'approved') {
+    driver.extension.approvedDuration = approvedDuration !== undefined ? approvedDuration : (driver.extension.duration || 15);
+    driver.extension.approvedTime = Date.now();
     driver.status = 'active';
     driver.violations.skippedLunch = false;
   }
