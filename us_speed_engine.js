@@ -1,17 +1,17 @@
 /**
  * US Speed Limit Engine (Multi-source GIS Resolver)
- * Sources:
- * 1. Coordinator Manual Zone Override
- * 2. Nominatim Reverse Geocoder (Extracts official road name: Highway/Freeway/Expressway/Avenue/Street)
- * 3. OpenStreetMap Overpass API (maxspeed tag & highway classification)
- * 4. Official US DOT (FHWA) GIS Feature API
- * 5. Static Default Zone
+ * 
+ * Statutory US Speed Limits:
+ * - Rural Roads, County Roads, Unposted Highways (GA / TX / US): 55 MPH
+ * - Interstate Freeways: 65 - 70 MPH
+ * - Urban Commercial / City Centers: 30 - 35 MPH
+ * - School / Residential Streets: 20 - 25 MPH
  */
 
 const speedCache = new Map();
 
 /**
- * 1. Query Nominatim Reverse Geocoder for exact road name classification
+ * 1. Query Nominatim Reverse Geocoder for exact road name & area classification
  */
 async function fetchNominatimRoadLimit(lat, lng) {
   if (!lat || !lng) return null;
@@ -29,24 +29,45 @@ async function fetchNominatimRoadLimit(lat, lng) {
 
     if (response.ok) {
       const data = await response.json();
-      const roadName = (data.address && (data.address.road || data.address.highway || data.name)) || '';
-      const lower = roadName.toLowerCase();
+      const addr = data.address || {};
+      const roadName = (addr.road || addr.highway || data.name || '').toLowerCase();
+      const display = (data.display_name || '').toLowerCase();
 
-      if (lower.includes('interstate') || lower.includes('i-') || lower.includes('freeway') || lower.includes('fwy') || lower.includes('turnpike')) {
+      // 1. Interstates & Expressways -> 65 MPH
+      if (roadName.includes('interstate') || roadName.includes('i-') || roadName.includes('freeway') || roadName.includes('fwy') || roadName.includes('turnpike')) {
         return 65;
       }
-      if (lower.includes('highway') || lower.includes('hwy') || lower.includes('expressway') || lower.includes('loop') || lower.includes('state route') || lower.includes('sh-') || lower.includes('us-')) {
-        return 55;
+
+      // 2. State Routes, Highways, County Roads, Rural Corridors -> 55 MPH
+      if (
+        roadName.includes('highway') || roadName.includes('hwy') || roadName.includes('expressway') || 
+        roadName.includes('loop') || roadName.includes('sh-') || roadName.includes('us-') || 
+        roadName.includes('bridge') || roadName.includes('county road') || roadName.includes('cr-') || 
+        roadName.includes('fm-') || roadName.includes('route') || roadName.includes('plantations') ||
+        addr.county || addr.hamlet || addr.village
+      ) {
+        return 55; // Georgia & US Statutory Rural / County Road Limit
       }
-      if (lower.includes('parkway') || lower.includes('pkwy') || lower.includes('boulevard') || lower.includes('blvd') || lower.includes('avenue') || lower.includes('ave')) {
+
+      // 3. Urban Boulevards & Parkways -> 45 MPH
+      if (roadName.includes('parkway') || roadName.includes('pkwy') || roadName.includes('boulevard') || roadName.includes('blvd') || roadName.includes('avenue') || roadName.includes('ave')) {
         return 45;
       }
-      if (lower.includes('street') || lower.includes('st') || lower.includes('road') || lower.includes('rd') || lower.includes('drive') || lower.includes('dr')) {
-        return 35;
+
+      // 4. Urban City Streets -> 35 MPH
+      if (addr.city || addr.town) {
+        if (roadName.includes('street') || roadName.includes('st') || roadName.includes('road') || roadName.includes('rd') || roadName.includes('drive') || roadName.includes('dr')) {
+          return 35;
+        }
       }
-      if (lower.includes('lane') || lower.includes('ln') || lower.includes('court') || lower.includes('ct') || lower.includes('way') || lower.includes('school')) {
+
+      // 5. Residential Lanes & School Zones -> 25 MPH
+      if (roadName.includes('lane') || roadName.includes('ln') || roadName.includes('court') || roadName.includes('ct') || roadName.includes('way') || roadName.includes('school')) {
         return 25;
       }
+
+      // Default for rural / unposted area -> 55 MPH
+      return 55;
     }
   } catch (e) {
     // Timeout or network error
@@ -64,7 +85,7 @@ async function fetchOSMData(lat, lng) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 1800);
 
-    const query = `[out:json];way(around:200,${lat},${lng})[highway];out tags;`;
+    const query = `[out:json];way(around:300,${lat},${lng})[highway];out tags;`;
     const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
 
     const response = await fetch(url, { signal: controller.signal });
@@ -87,9 +108,9 @@ async function fetchOSMData(lat, lng) {
             const htype = el.tags.highway;
             if (htype === 'motorway' || htype === 'motorway_link') return 65;
             if (htype === 'trunk' || htype === 'trunk_link') return 55;
-            if (htype === 'primary' || htype === 'primary_link') return 45;
-            if (htype === 'secondary' || htype === 'secondary_link') return 35;
-            if (htype === 'tertiary' || htype === 'residential' || htype === 'living_street') return 25;
+            if (htype === 'primary' || htype === 'primary_link' || htype === 'secondary' || htype === 'secondary_link' || htype === 'unclassified') return 55;
+            if (htype === 'tertiary') return 45;
+            if (htype === 'residential' || htype === 'living_street') return 25;
           }
         }
       }
@@ -99,57 +120,24 @@ async function fetchOSMData(lat, lng) {
 }
 
 /**
- * 3. Query Official US DOT GIS Endpoint
- */
-async function fetchUSDOTSpeedLimit(lat, lng) {
-  if (!lat || !lng) return null;
-
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 1500);
-
-    const url = `https://services.gis.fhwa.dot.gov/arcgis/rest/services/Highway/HPMS_Speed_Limits/MapServer/0/query?geometry=${lng},${lat}&geometryType=esriGeometryPoint&inSR=4326&spatialRel=esriSpatialRelIntersects&distance=100&units=esriSRUnit_Meter&outFields=SPEED_LIMIT,SPEED_LIMIT_PASSENGER,SPEED_LIMIT_TRUCK&f=json`;
-
-    const response = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeout);
-
-    if (response.ok) {
-      const data = await response.json();
-      if (data.features && data.features.length > 0) {
-        for (const feat of data.features) {
-          const attrs = feat.attributes || {};
-          const speed = attrs.SPEED_LIMIT || attrs.SPEED_LIMIT_PASSENGER || attrs.SPEED_LIMIT_TRUCK;
-          const parsed = parseInt(speed, 10);
-          if (!isNaN(parsed) && parsed > 0) {
-            return parsed;
-          }
-        }
-      }
-    }
-  } catch (e) {}
-  return null;
-}
-
-/**
- * Synchronous local static fallback
+ * Synchronous local static fallback (Defaults to 55 MPH rural statutory limit)
  */
 function getLocalUSRoadSpeedLimit(lat, lng, speed = 0, settings = null) {
   if (settings && settings.roadSpeedLimitOverride && settings.roadSpeedLimitOverride > 0) {
     return settings.roadSpeedLimitOverride;
   }
-  return 35;
+  return 55; // US Statutory Rural Road Limit
 }
 
 /**
  * Multi-source Async Speed Limit Resolver:
- * 1. Coordinator Manual Override (highest priority)
+ * 1. Coordinator / Tablet Manual Override (highest priority)
  * 2. Nominatim Reverse Geocoder Road Classification
  * 3. OpenStreetMap Overpass Tag Query
- * 4. Official US DOT GIS API
- * 5. Static Default Zone (35 MPH)
+ * 4. Rural Statutory Default (55 MPH)
  */
 async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
-  // 1. Coordinator Manual Override
+  // 1. Coordinator / Tablet Manual Override
   if (settings && settings.roadSpeedLimitOverride && settings.roadSpeedLimitOverride > 0) {
     return settings.roadSpeedLimitOverride;
   }
@@ -174,15 +162,8 @@ async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
     return osmSpeed;
   }
 
-  // 4. Query Official US DOT API
-  const dotSpeed = await fetchUSDOTSpeedLimit(lat, lng);
-  if (dotSpeed !== null) {
-    speedCache.set(cacheKey, { speedLimit: dotSpeed, timestamp: Date.now() });
-    return dotSpeed;
-  }
-
-  // 5. Default Zone
-  return 35;
+  // 4. US Statutory Rural Limit Default (55 MPH)
+  return 55;
 }
 
 module.exports = {
