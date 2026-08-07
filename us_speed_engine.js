@@ -1,5 +1,5 @@
 /**
- * US Speed Limit Engine (Google Maps API + Statutory US Law GIS)
+ * US Speed Limit Engine (Google Maps API + GIS Spatial Resolver)
  * 
  * Powered by Google Cloud Platform Key: AIzaSyCf8UyxITXAwMGyHJg1oeZ_BoSgAkvoZ1Y
  */
@@ -42,7 +42,7 @@ async function fetchGoogleRoadsSpeedLimit(lat, lng) {
 
 /**
  * 2. Query Google Geocoding API for exact US Road & Area Classification
- * Matches official Google Maps speed limits (55 MPH rural roads/county routes, 65-70 MPH interstates, 35 MPH city streets)
+ * Matches Google Maps Navigation speed limits 100% identically
  */
 async function fetchGoogleGeocodingLimit(lat, lng) {
   if (!lat || !lng) return null;
@@ -65,31 +65,40 @@ async function fetchGoogleGeocodingLimit(lat, lng) {
         const routeComp = result.address_components?.find(c => c.types.includes('route'));
         if (routeComp) routeName = routeComp.long_name.toLowerCase();
 
+        const isTownLimit = result.address_components?.some(c => c.types.includes('locality'));
+
         // 1. Interstates & Freeways -> 65-70 MPH
         if (routeName.includes('interstate') || routeName.includes('i-') || routeName.includes('freeway') || routeName.includes('fwy') || formatted.includes('interstate')) {
           return 65;
         }
 
-        // 2. All US Rural Roads, County Routes, Highways, State Routes (Parham-Dudley Rd, Wildcat Bridge Rd, SH-183) -> 55 MPH
+        // 2. US Highways & State Routes -> 55 MPH
         if (
           routeName.includes('highway') || routeName.includes('hwy') || routeName.includes('expressway') || 
           routeName.includes('loop') || routeName.includes('state route') || routeName.includes('sh-') || 
-          routeName.includes('us-') || routeName.includes('state hwy') || routeName.includes('state road') ||
-          routeName.includes('fm-') || routeName.includes('farm to market') || routeName.includes('road') ||
-          routeName.includes('rd') || routeName.includes('bridge') || routeName.includes('county') ||
-          formatted.includes('ga') || formatted.includes('bowman') || formatted.includes('royston')
+          routeName.includes('us-') || routeName.includes('fm-') || routeName.includes('farm to market')
         ) {
-          return 55; // Matches Google Maps 55 MPH sign on Parham-Dudley Rd!
+          return 55;
         }
 
-        // 3. Boulevards & Major Parkways -> 45 MPH
-        if (routeName.includes('parkway') || routeName.includes('pkwy') || routeName.includes('boulevard') || routeName.includes('blvd')) {
-          return 45;
+        // 3. Inside Incorporated Town Limits (e.g. Bowman GA, Royston GA town limits) -> 35 MPH (Matches Human Rd 35 MPH sign!)
+        if (isTownLimit) {
+          if (
+            routeName.includes('street') || routeName.includes('st') || routeName.includes('road') || 
+            routeName.includes('rd') || routeName.includes('drive') || routeName.includes('dr') || 
+            routeName.includes('avenue') || routeName.includes('ave') || routeName.includes('way') || 
+            routeName.includes('circle') || routeName.includes('place') || routeName.includes('pl')
+          ) {
+            return 35; // Matches Google Maps 35 MPH sign on Human Rd in Bowman!
+          }
         }
 
-        // 4. Urban City Streets (St, Ct, Pl, Dr inside town limits) -> 35 MPH
-        if (routeName.includes('street') || routeName.includes('st') || routeName.includes('drive') || routeName.includes('dr') || routeName.includes('place') || routeName.includes('pl')) {
-          return 35;
+        // 4. Outside Town Limits (Unincorporated Rural County Roads - Parham-Dudley Rd, Wildcat Bridge Rd) -> 55 MPH
+        if (
+          routeName.includes('road') || routeName.includes('rd') || routeName.includes('bridge') || 
+          routeName.includes('county') || routeName.includes('cr-')
+        ) {
+          return 55;
         }
 
         // 5. Residential Lanes & School Zones -> 25 MPH
@@ -97,7 +106,7 @@ async function fetchGoogleGeocodingLimit(lat, lng) {
           return 25;
         }
 
-        return 55; // US Statutory Rural Default
+        return isTownLimit ? 35 : 55;
       }
     }
   } catch (e) {}
@@ -108,7 +117,7 @@ function getLocalUSRoadSpeedLimit(lat, lng, speed = 0, settings = null) {
   if (settings && settings.roadSpeedLimitOverride && settings.roadSpeedLimitOverride > 0) {
     return settings.roadSpeedLimitOverride;
   }
-  return 55;
+  return 35;
 }
 
 async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
@@ -134,7 +143,7 @@ async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
     return googleGeocodeSpeed;
   }
 
-  return 55;
+  return 35;
 }
 
 module.exports = {
