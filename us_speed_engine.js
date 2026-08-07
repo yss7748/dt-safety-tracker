@@ -1,19 +1,18 @@
 /**
  * US Speed Limit Spatial Engine
- * Comprehensive US Road Classification System covering:
+ * Integrates Official USDOT / FHWA ArcGIS REST API + Local Spatial Classification
+ * Covering:
  * - School Zones & Residential Streets (20 - 25 MPH)
  * - Urban & Municipal Commercial Zones (25 - 35 MPH)
  * - Rural Highways & State Arterials (45 - 55 MPH)
  * - Interstate & Expressway Corridors (65 - 75 MPH)
  */
 
+// In-Memory Cache for USDOT GIS API Lookups (15-second TTL)
+const usdotCache = new Map();
+
 // Major US Spatial Zones & Corridors
 const US_ZONES = {
-  // School & Residential Micro-Geofences (20 - 25 MPH)
-  schoolZones: [
-    { name: 'US Urban School Zone', minSpeed: 0, maxSpeed: 24, defaultLimit: 20 }
-  ],
-  
   // High-Density Urban / Municipal Commercial Zones (25 - 35 MPH)
   urbanCommercial: [
     { name: 'Dallas Downtown Core', minLat: 32.77, maxLat: 32.79, minLng: -96.81, maxLng: -96.78, speed: 30 },
@@ -49,38 +48,73 @@ const US_ZONES = {
 };
 
 /**
- * Resolves speed limit across US School, Urban, Rural, and Interstate road zones.
+ * Queries the official USDOT / FHWA ArcGIS REST Feature API for posted speed limit
  * @param {number} lat - Latitude
  * @param {number} lng - Longitude
- * @param {number} speed - Current driving speed in MPH
- * @param {object} settings - Driver rules settings
- * @returns {number} Resolved road speed limit in MPH
+ * @returns {Promise<number|null>} Speed limit in MPH or null if unavailable
  */
-function getUSRoadSpeedLimit(lat, lng, speed = 0, settings = null) {
-  // 1. Manual Coordinator Override has absolute highest priority
+async function fetchUSDOTSpeedLimit(lat, lng) {
+  if (!lat || !lng) return null;
+
+  // Round key to ~10 meters for caching
+  const cacheKey = `${lat.toFixed(4)},${lng.toFixed(4)}`;
+  const cached = usdotCache.get(cacheKey);
+  if (cached && (Date.now() - cached.timestamp < 15000)) {
+    return cached.speedLimit;
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1200); // 1.2s timeout limit for zero lag
+
+    // USDOT / FHWA Speed Limit Feature Server Endpoint
+    const endpoint = `https://services.gis.fhwa.dot.gov/arcgis/rest/services/Highway/HPMS_Speed_Limits/MapServer/0/query?geometry=${lng},${lat}&geometryType=esriGeometryPoint&spatialRel=esriSpatialRelIntersects&distance=100&units=esriSRUnit_Meter&outFields=SPEED_LIMIT,SPEED_LIMIT_PASSENGER,SPEED_LIMIT_TRUCK&f=json`;
+
+    const response = await fetch(endpoint, { signal: controller.signal });
+    clearTimeout(timeout);
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.features && data.features.length > 0) {
+        for (const feature of data.features) {
+          const attrs = feature.attributes || {};
+          const speed = attrs.SPEED_LIMIT || attrs.SPEED_LIMIT_PASSENGER || attrs.SPEED_LIMIT_TRUCK;
+          const parsed = parseInt(speed, 10);
+          if (!isNaN(parsed) && parsed > 0) {
+            usdotCache.set(cacheKey, { speedLimit: parsed, timestamp: Date.now() });
+            return parsed;
+          }
+        }
+      }
+    }
+  } catch (err) {
+    // Timeout or network error — fail silently to local engine
+  }
+
+  return null;
+}
+
+/**
+ * Synchronous local spatial fallback calculator
+ */
+function getLocalUSRoadSpeedLimit(lat, lng, speed = 0, settings = null) {
   if (settings && settings.roadSpeedLimitOverride && settings.roadSpeedLimitOverride > 0) {
     return settings.roadSpeedLimitOverride;
   }
 
   const currentSpeed = Math.round(speed || 0);
 
-  // 2. Spatial GIS Geofence Matching
   if (lat && lng) {
-    // Check Urban Commercial Zones (25 - 35 MPH)
     for (const zone of US_ZONES.urbanCommercial) {
       if (lat >= zone.minLat && lat <= zone.maxLat && lng >= zone.minLng && lng <= zone.maxLng) {
         if (currentSpeed < 45) return zone.speed;
       }
     }
-
-    // Check Rural Arterials & State Highways (55 MPH)
     for (const zone of US_ZONES.ruralArterials) {
       if (lat >= zone.minLat && lat <= zone.maxLat && lng >= zone.minLng && lng <= zone.maxLng) {
         if (currentSpeed >= 40) return zone.speed;
       }
     }
-
-    // Check Interstate Highways (65 - 70 MPH)
     for (const zone of US_ZONES.interstates) {
       if (lat >= zone.minLat && lat <= zone.maxLat && lng >= zone.minLng && lng <= zone.maxLng) {
         if (currentSpeed >= 50) return zone.speed;
@@ -88,14 +122,33 @@ function getUSRoadSpeedLimit(lat, lng, speed = 0, settings = null) {
     }
   }
 
-  // 3. Dynamic Classification Engine across US Road Types
-  if (currentSpeed >= 60) return 65; // Interstate / Expressway (65 MPH)
-  if (currentSpeed >= 48) return 55; // Rural Highway / State Arterial (55 MPH)
-  if (currentSpeed >= 35) return 45; // Urban Primary Thoroughfare (45 MPH)
-  if (currentSpeed >= 20) return 35; // City / Municipal Street (35 MPH)
-  return 20; // School Zone / Residential Street (20 MPH)
+  if (currentSpeed >= 60) return 65;
+  if (currentSpeed >= 48) return 55;
+  if (currentSpeed >= 35) return 45;
+  if (currentSpeed >= 20) return 35;
+  return 20;
+}
+
+/**
+ * Async resolver prioritizing 1. Coordinator Override -> 2. Official USDOT GIS API -> 3. Local Spatial Engine
+ */
+async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
+  // 1. Coordinator Override
+  if (settings && settings.roadSpeedLimitOverride && settings.roadSpeedLimitOverride > 0) {
+    return settings.roadSpeedLimitOverride;
+  }
+
+  // 2. Official USDOT / FHWA ArcGIS API
+  const usdotSpeed = await fetchUSDOTSpeedLimit(lat, lng);
+  if (usdotSpeed !== null) {
+    return usdotSpeed;
+  }
+
+  // 3. Local Spatial Engine Fallback
+  return getLocalUSRoadSpeedLimit(lat, lng, speed, settings);
 }
 
 module.exports = {
-  getUSRoadSpeedLimit
+  getUSRoadSpeedLimit: getLocalUSRoadSpeedLimit,
+  getUSRoadSpeedLimitAsync
 };
