@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const { getUSRoadSpeedLimit } = require('./us_speed_engine');
+const { getUSRoadSpeedLimit, getUSRoadSpeedLimitAsync } = require('./us_speed_engine');
 
 const app = express();
 const PORT = process.env.PORT || 5050;
@@ -21,7 +21,7 @@ app.get('/api/status', (req, res) => {
 });
 
 // GET /api/drivers
-app.get('/api/drivers', (req, res) => {
+app.get('/api/drivers', async (req, res) => {
   const drivers = [];
   const updatedList = [];
   let listUpdated = false;
@@ -46,8 +46,8 @@ app.get('/api/drivers', (req, res) => {
           }
         }
 
-        // Calculate US Road Speed Limit via Spatial Engine
-        val.roadSpeedLimit = getUSRoadSpeedLimit(val.lat, val.lng, val.speed, val.settings);
+        // Calculate US Road Speed Limit via USDOT API & Spatial Engine
+        val.roadSpeedLimit = await getUSRoadSpeedLimitAsync(val.lat, val.lng, val.speed, val.settings);
 
         drivers.push({
           ...val,
@@ -116,7 +116,7 @@ app.post('/api/register', (req, res) => {
 });
 
 // POST /api/telemetry
-app.post('/api/telemetry', (req, res) => {
+app.post('/api/telemetry', async (req, res) => {
   const { imei, lat, lng, speed, heading, status, networkStatus, violations, lastBrakeTime } = req.body;
   if (!imei) return res.status(400).json({ error: 'Missing IMEI' });
 
@@ -133,8 +133,8 @@ app.post('/api/telemetry', (req, res) => {
   driver.networkStatus = networkStatus || '4g';
   driver.lastTelemetryTime = Date.now();
 
-  // Calculate Road Speed Limit using US Spatial Engine
-  driver.roadSpeedLimit = getUSRoadSpeedLimit(lat, lng, speed, driver.settings);
+  // Calculate Road Speed Limit using official USDOT GIS API & Spatial Engine
+  driver.roadSpeedLimit = await getUSRoadSpeedLimitAsync(lat, lng, speed, driver.settings);
 
   if (violations) {
     driver.violations = {
