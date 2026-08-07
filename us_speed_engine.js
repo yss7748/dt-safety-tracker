@@ -1,28 +1,55 @@
 /**
- * US Speed Limit Spatial Engine
+ * US Speed Limit Engine
  * Priority 1: Coordinator Manual Override
- * Priority 2: Real OpenStreetMap (OSM) Overpass API Query (maxspeed & highway type)
- * Priority 3: Fixed Default Zone (35 MPH)
+ * Priority 2: Official US DOT (Department of Transportation / FHWA) GIS API
+ * Priority 3: Real OpenStreetMap (OSM) Overpass API
+ * Priority 4: Fixed Static Default (35 MPH)
  * 
  * CRITICAL RULE: Speed limit must NEVER depend on current vehicle speed!
  */
 
-const osmCache = new Map();
+const speedCache = new Map();
 
 /**
- * Queries OpenStreetMap Overpass API for real posted speed limit or road classification.
- * @param {number} lat - Latitude
- * @param {number} lng - Longitude
- * @returns {Promise<number|null>} Speed limit in MPH or null
+ * 1. Query Official US DOT (Department of Transportation) ArcGIS REST API
+ */
+async function fetchUSDOTSpeedLimit(lat, lng) {
+  if (!lat || !lng) return null;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1500);
+
+    // Official US DOT FHWA GIS Endpoint with WGS84 4326 Spatial Reference
+    const url = `https://services.gis.fhwa.dot.gov/arcgis/rest/services/Highway/HPMS_Speed_Limits/MapServer/0/query?geometry=${lng},${lat}&geometryType=esriGeometryPoint&inSR=4326&spatialRel=esriSpatialRelIntersects&distance=100&units=esriSRUnit_Meter&outFields=SPEED_LIMIT,SPEED_LIMIT_PASSENGER,SPEED_LIMIT_TRUCK&f=json`;
+
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.features && data.features.length > 0) {
+        for (const feat of data.features) {
+          const attrs = feat.attributes || {};
+          const speed = attrs.SPEED_LIMIT || attrs.SPEED_LIMIT_PASSENGER || attrs.SPEED_LIMIT_TRUCK;
+          const parsed = parseInt(speed, 10);
+          if (!isNaN(parsed) && parsed > 0) {
+            return parsed;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    // US DOT service timeout or network error — failover to OSM
+  }
+  return null;
+}
+
+/**
+ * 2. Query OpenStreetMap (OSM) Overpass API
  */
 async function fetchOSMData(lat, lng) {
   if (!lat || !lng) return null;
-
-  const cacheKey = `${lat.toFixed(4)},${lng.toFixed(4)}`;
-  const cached = osmCache.get(cacheKey);
-  if (cached && (Date.now() - cached.timestamp < 30000)) {
-    return cached.speedLimit;
-  }
 
   try {
     const controller = new AbortController();
@@ -37,46 +64,39 @@ async function fetchOSMData(lat, lng) {
     if (response.ok) {
       const data = await response.json();
       if (data.elements && data.elements.length > 0) {
-        // 1. Explicit maxspeed tag (e.g. "55 mph" -> 55)
+        // Explicit maxspeed tag (e.g. "55 mph" -> 55)
         for (const el of data.elements) {
           if (el.tags && el.tags.maxspeed) {
             const raw = el.tags.maxspeed;
             const parsed = parseInt(raw.replace(/[^\d]/g, ''), 10);
             if (!isNaN(parsed) && parsed > 0) {
-              osmCache.set(cacheKey, { speedLimit: parsed, timestamp: Date.now() });
               return parsed;
             }
           }
         }
 
-        // 2. OSM Highway type classification
+        // OSM Highway type classification
         for (const el of data.elements) {
           if (el.tags && el.tags.highway) {
             const htype = el.tags.highway;
-            let resolvedLimit = null;
-            if (htype === 'motorway' || htype === 'motorway_link') resolvedLimit = 65;
-            else if (htype === 'trunk' || htype === 'trunk_link') resolvedLimit = 55;
-            else if (htype === 'primary' || htype === 'primary_link') resolvedLimit = 45;
-            else if (htype === 'secondary' || htype === 'secondary_link') resolvedLimit = 35;
-            else if (htype === 'tertiary' || htype === 'residential' || htype === 'living_street') resolvedLimit = 25;
-
-            if (resolvedLimit) {
-              osmCache.set(cacheKey, { speedLimit: resolvedLimit, timestamp: Date.now() });
-              return resolvedLimit;
-            }
+            if (htype === 'motorway' || htype === 'motorway_link') return 65;
+            if (htype === 'trunk' || htype === 'trunk_link') return 55;
+            if (htype === 'primary' || htype === 'primary_link') return 45;
+            if (htype === 'secondary' || htype === 'secondary_link') return 35;
+            if (htype === 'tertiary' || htype === 'residential' || htype === 'living_street') return 25;
           }
         }
       }
     }
   } catch (err) {
-    // Network / timeout error — fail to fallback
+    // OSM network error — failover to default
   }
 
   return null;
 }
 
 /**
- * Gets fixed fallback road limit (STRICTLY FIXED 35 MPH — NO SPEED GUESSTIMATE!)
+ * Synchronous local static fallback
  */
 function getLocalUSRoadSpeedLimit(lat, lng, speed = 0, settings = null) {
   if (settings && settings.roadSpeedLimitOverride && settings.roadSpeedLimitOverride > 0) {
@@ -86,10 +106,11 @@ function getLocalUSRoadSpeedLimit(lat, lng, speed = 0, settings = null) {
 }
 
 /**
- * Async resolver:
- * 1. Coordinator Override (if set)
- * 2. Real OpenStreetMap API Road Lookup
- * 3. Fixed Default (35 MPH)
+ * Multi-source Async Resolver:
+ * 1. Coordinator Manual Override
+ * 2. Official US DOT (FHWA) GIS API Query
+ * 3. OpenStreetMap (OSM) API Query
+ * 4. Fixed Default (35 MPH)
  */
 async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
   // 1. Coordinator Manual Override
@@ -97,13 +118,27 @@ async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
     return settings.roadSpeedLimitOverride;
   }
 
-  // 2. Real OpenStreetMap API Query
+  const cacheKey = `${lat ? lat.toFixed(4) : 0},${lng ? lng.toFixed(4) : 0}`;
+  const cached = speedCache.get(cacheKey);
+  if (cached && (Date.now() - cached.timestamp < 30000)) {
+    return cached.speedLimit;
+  }
+
+  // 2. Query Official US DOT API First!
+  const dotSpeed = await fetchUSDOTSpeedLimit(lat, lng);
+  if (dotSpeed !== null) {
+    speedCache.set(cacheKey, { speedLimit: dotSpeed, timestamp: Date.now() });
+    return dotSpeed;
+  }
+
+  // 3. Query OpenStreetMap API Fallback
   const osmSpeed = await fetchOSMData(lat, lng);
   if (osmSpeed !== null) {
+    speedCache.set(cacheKey, { speedLimit: osmSpeed, timestamp: Date.now() });
     return osmSpeed;
   }
 
-  // 3. Fixed Static Default (35 MPH) — NEVER changes based on vehicle speed!
+  // 4. Fixed Static Default (35 MPH) — NEVER changes based on vehicle speed!
   return 35;
 }
 
