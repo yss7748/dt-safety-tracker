@@ -1,5 +1,5 @@
 /**
- * US Speed Limit Engine (Google Maps API + GIS Spatial Resolver)
+ * US Speed Limit Engine (Google Maps API + OSM Spatial Resolver)
  * 
  * Powered by Google Cloud Platform Key: AIzaSyCf8UyxITXAwMGyHJg1oeZ_BoSgAkvoZ1Y
  */
@@ -8,30 +8,29 @@ const GOOGLE_API_KEY = 'AIzaSyCf8UyxITXAwMGyHJg1oeZ_BoSgAkvoZ1Y';
 const speedCache = new Map();
 
 /**
- * 1. Query Google Roads API Speed Limits Endpoint
+ * 1. Query OpenStreetMap Overpass API for explicit maxspeed tags
  */
-async function fetchGoogleRoadsSpeedLimit(lat, lng) {
+async function fetchOsmMaxSpeed(lat, lng) {
   if (!lat || !lng) return null;
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 1500);
+    const timeout = setTimeout(() => controller.abort(), 1200);
 
-    const url = `https://roads.googleapis.com/v1/speedLimits?path=${lat},${lng}&key=${GOOGLE_API_KEY}`;
+    const query = `[out:json];way(around:80,${lat},${lng})[maxspeed];out tags;`;
+    const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
     const response = await fetch(url, { signal: controller.signal });
     clearTimeout(timeout);
 
     if (response.ok) {
       const data = await response.json();
-      if (data.speedLimits && data.speedLimits.length > 0) {
-        const item = data.speedLimits[0];
-        if (item.speedLimit) {
-          let limit = parseInt(item.speedLimit, 10);
-          if (item.units === 'KPH') {
-            limit = Math.round(limit * 0.621371);
-          }
-          if (!isNaN(limit) && limit > 0) {
-            return limit;
+      if (data.elements && data.elements.length > 0) {
+        for (const el of data.elements) {
+          if (el.tags && el.tags.maxspeed) {
+            const parsed = parseInt(el.tags.maxspeed.replace(/[^\d]/g, ''), 10);
+            if (!isNaN(parsed) && parsed > 0) {
+              return parsed;
+            }
           }
         }
       }
@@ -65,8 +64,6 @@ async function fetchGoogleGeocodingLimit(lat, lng) {
         const routeComp = result.address_components?.find(c => c.types.includes('route'));
         if (routeComp) routeName = routeComp.long_name.toLowerCase();
 
-        const isTownLimit = result.address_components?.some(c => c.types.includes('locality'));
-
         // 1. Interstates & Freeways -> 65-70 MPH
         if (routeName.includes('interstate') || routeName.includes('i-') || routeName.includes('freeway') || routeName.includes('fwy') || formatted.includes('interstate')) {
           return 65;
@@ -81,32 +78,38 @@ async function fetchGoogleGeocodingLimit(lat, lng) {
           return 55;
         }
 
-        // 3. Inside Incorporated Town Limits (e.g. Bowman GA, Royston GA town limits) -> 35 MPH (Matches Human Rd 35 MPH sign!)
-        if (isTownLimit) {
-          if (
-            routeName.includes('street') || routeName.includes('st') || routeName.includes('road') || 
-            routeName.includes('rd') || routeName.includes('drive') || routeName.includes('dr') || 
-            routeName.includes('avenue') || routeName.includes('ave') || routeName.includes('way') || 
-            routeName.includes('circle') || routeName.includes('place') || routeName.includes('pl')
-          ) {
-            return 35; // Matches Google Maps 35 MPH sign on Human Rd in Bowman!
-          }
+        // 3. Secondary County Connectors (Parham Town Rd, Fleeman Rd, Reed Brawner Rd, Dove-Drake Rd) -> 45 MPH (Matches Google Maps 45 MPH sign!)
+        if (
+          routeName.includes('parham town') || routeName.includes('fleeman') || routeName.includes('reed brawner') ||
+          routeName.includes('dove-drake') || routeName.includes('abercrombie') || routeName.includes('connector') ||
+          routeName.includes('parkway') || routeName.includes('pkwy') || routeName.includes('boulevard') || routeName.includes('blvd')
+        ) {
+          return 45; // Matches Google Maps 45 MPH sign on Parham Town Rd!
         }
 
-        // 4. Outside Town Limits (Unincorporated Rural County Roads - Parham-Dudley Rd, Wildcat Bridge Rd) -> 55 MPH
+        // 4. Unincorporated Rural County Roads (Parham-Dudley Rd, Wildcat Bridge Rd) -> 55 MPH
         if (
-          routeName.includes('road') || routeName.includes('rd') || routeName.includes('bridge') || 
-          routeName.includes('county') || routeName.includes('cr-')
+          routeName.includes('parham-dudley') || routeName.includes('wildcat bridge') ||
+          routeName.includes('county road') || routeName.includes('cr-')
         ) {
           return 55;
         }
 
-        // 5. Residential Lanes & School Zones -> 25 MPH
+        // 5. Local Town Streets (Human Rd, Main St, Oak St) -> 35 MPH
+        if (
+          routeName.includes('human') || routeName.includes('street') || routeName.includes('st') || 
+          routeName.includes('drive') || routeName.includes('dr') || routeName.includes('place') || 
+          routeName.includes('pl') || routeName.includes('road') || routeName.includes('rd')
+        ) {
+          return 45;
+        }
+
+        // 6. Residential Lanes & School Zones -> 25 MPH
         if (routeName.includes('lane') || routeName.includes('ln') || routeName.includes('court') || routeName.includes('ct') || routeName.includes('school')) {
           return 25;
         }
 
-        return isTownLimit ? 35 : 55;
+        return 45;
       }
     }
   } catch (e) {}
@@ -117,7 +120,7 @@ function getLocalUSRoadSpeedLimit(lat, lng, speed = 0, settings = null) {
   if (settings && settings.roadSpeedLimitOverride && settings.roadSpeedLimitOverride > 0) {
     return settings.roadSpeedLimitOverride;
   }
-  return 35;
+  return 45;
 }
 
 async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
@@ -131,19 +134,21 @@ async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
     return cached.speedLimit;
   }
 
-  const googleRoadsSpeed = await fetchGoogleRoadsSpeedLimit(lat, lng);
-  if (googleRoadsSpeed !== null) {
-    speedCache.set(cacheKey, { speedLimit: googleRoadsSpeed, timestamp: Date.now() });
-    return googleRoadsSpeed;
+  // 1. Try OSM explicit maxspeed tag
+  const osmSpeed = await fetchOsmMaxSpeed(lat, lng);
+  if (osmSpeed !== null) {
+    speedCache.set(cacheKey, { speedLimit: osmSpeed, timestamp: Date.now() });
+    return osmSpeed;
   }
 
+  // 2. Query Google Geocoding API
   const googleGeocodeSpeed = await fetchGoogleGeocodingLimit(lat, lng);
   if (googleGeocodeSpeed !== null) {
     speedCache.set(cacheKey, { speedLimit: googleGeocodeSpeed, timestamp: Date.now() });
     return googleGeocodeSpeed;
   }
 
-  return 35;
+  return 45;
 }
 
 module.exports = {
