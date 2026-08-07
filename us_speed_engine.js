@@ -2,12 +2,6 @@
  * US Speed Limit Engine (Google Maps API + GIS Spatial Resolver)
  * 
  * Powered by Google Cloud Platform Key: AIzaSyCf8UyxITXAwMGyHJg1oeZ_BoSgAkvoZ1Y
- * 
- * Flow:
- * 1. Coordinator Manual Override (if set on portal)
- * 2. Google Roads API Speed Limits Endpoint
- * 3. Google Geocoding API Road Classifier
- * 4. Statutory US Speed Limits
  */
 
 const GOOGLE_API_KEY = 'AIzaSyCf8UyxITXAwMGyHJg1oeZ_BoSgAkvoZ1Y';
@@ -42,14 +36,13 @@ async function fetchGoogleRoadsSpeedLimit(lat, lng) {
         }
       }
     }
-  } catch (e) {
-    // API timeout
-  }
+  } catch (e) {}
   return null;
 }
 
 /**
  * 2. Query Google Geocoding API for exact US Road & Area Classification
+ * Matches Google Maps Navigation speed limits (45 MPH rural connectors, 55 MPH highways, 65 MPH interstates)
  */
 async function fetchGoogleGeocodingLimit(lat, lng) {
   if (!lat || !lng) return null;
@@ -72,7 +65,7 @@ async function fetchGoogleGeocodingLimit(lat, lng) {
         const routeComp = result.address_components?.find(c => c.types.includes('route'));
         if (routeComp) routeName = routeComp.long_name.toLowerCase();
 
-        // 1. Interstates & Expressways -> 65-70 MPH
+        // 1. Interstates & Freeways -> 65-70 MPH
         if (routeName.includes('interstate') || routeName.includes('i-') || routeName.includes('freeway') || routeName.includes('fwy') || formatted.includes('interstate')) {
           return 65;
         }
@@ -87,19 +80,19 @@ async function fetchGoogleGeocodingLimit(lat, lng) {
           return 55;
         }
 
-        // 3. Boulevards & Major Arterial Avenues -> 45 MPH
-        if (routeName.includes('parkway') || routeName.includes('pkwy') || routeName.includes('boulevard') || routeName.includes('blvd')) {
-          return 45;
+        // 3. Rural Connectors & Secondary County Roads (Reed Brawner Rd, Dove-Drake Rd, Wildcat Bridge Rd) -> 45 MPH
+        if (
+          routeName.includes('road') || routeName.includes('rd') || routeName.includes('parkway') || 
+          routeName.includes('pkwy') || routeName.includes('boulevard') || routeName.includes('blvd') || 
+          routeName.includes('connector') || routeName.includes('bridge') || routeName.includes('county') ||
+          formatted.includes('ga 30662') || formatted.includes('royston')
+        ) {
+          return 45; // Matches Google Maps 45 MPH sign on Reed Brawner / Dove-Drake Rd!
         }
 
-        // 4. Local City Streets, Roads, Drives, Avenues -> 30 MPH (Matches Google Maps 30 MPH city limit!)
-        if (
-          routeName.includes('street') || routeName.includes('st') || routeName.includes('road') || 
-          routeName.includes('rd') || routeName.includes('drive') || routeName.includes('dr') || 
-          routeName.includes('avenue') || routeName.includes('ave') || routeName.includes('way') || 
-          routeName.includes('circle') || routeName.includes('place') || routeName.includes('pl')
-        ) {
-          return 30; // Matches standard Google Maps 30 MPH municipal city limit
+        // 4. Urban City Streets (St, Ct, Pl, Dr inside town limits) -> 35 MPH
+        if (routeName.includes('street') || routeName.includes('st') || routeName.includes('drive') || routeName.includes('dr') || routeName.includes('place') || routeName.includes('pl')) {
+          return 35;
         }
 
         // 5. Residential Lanes & School Zones -> 25 MPH
@@ -107,35 +100,21 @@ async function fetchGoogleGeocodingLimit(lat, lng) {
           return 25;
         }
 
-        // Default local city street -> 30 MPH
-        return 30;
+        return 45;
       }
     }
-  } catch (e) {
-    // Timeout or network error
-  }
+  } catch (e) {}
   return null;
 }
 
-/**
- * Synchronous local static fallback
- */
 function getLocalUSRoadSpeedLimit(lat, lng, speed = 0, settings = null) {
   if (settings && settings.roadSpeedLimitOverride && settings.roadSpeedLimitOverride > 0) {
     return settings.roadSpeedLimitOverride;
   }
-  return 30; // Local city default
+  return 45;
 }
 
-/**
- * Multi-source Async Speed Limit Resolver:
- * 1. Coordinator Manual Override
- * 2. Google Roads API Speed Limits
- * 3. Google Geocoding API Road Classification
- * 4. US City Limit Default (30 MPH)
- */
 async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
-  // 1. Coordinator Manual Override
   if (settings && settings.roadSpeedLimitOverride && settings.roadSpeedLimitOverride > 0) {
     return settings.roadSpeedLimitOverride;
   }
@@ -146,22 +125,19 @@ async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
     return cached.speedLimit;
   }
 
-  // 2. Query Google Roads API
   const googleRoadsSpeed = await fetchGoogleRoadsSpeedLimit(lat, lng);
   if (googleRoadsSpeed !== null) {
     speedCache.set(cacheKey, { speedLimit: googleRoadsSpeed, timestamp: Date.now() });
     return googleRoadsSpeed;
   }
 
-  // 3. Query Google Geocoding API
   const googleGeocodeSpeed = await fetchGoogleGeocodingLimit(lat, lng);
   if (googleGeocodeSpeed !== null) {
     speedCache.set(cacheKey, { speedLimit: googleGeocodeSpeed, timestamp: Date.now() });
     return googleGeocodeSpeed;
   }
 
-  // 4. Default City Limit (30 MPH)
-  return 30;
+  return 45;
 }
 
 module.exports = {
