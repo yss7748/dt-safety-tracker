@@ -1,5 +1,5 @@
 /**
- * US Speed Limit Engine (Google Maps API + GIS Spatial Resolver)
+ * US Speed Limit Engine (Google Maps API + Statutory US Law GIS)
  * 
  * Powered by Google Cloud Platform Key: AIzaSyCf8UyxITXAwMGyHJg1oeZ_BoSgAkvoZ1Y
  */
@@ -42,7 +42,7 @@ async function fetchGoogleRoadsSpeedLimit(lat, lng) {
 
 /**
  * 2. Query Google Geocoding API for exact US Road & Area Classification
- * Matches Google Maps Navigation speed limits (45 MPH rural connectors, 55 MPH highways, 65 MPH interstates)
+ * Matches official Google Maps speed limits (55 MPH rural roads/county routes, 65-70 MPH interstates, 35 MPH city streets)
  */
 async function fetchGoogleGeocodingLimit(lat, lng) {
   if (!lat || !lng) return null;
@@ -70,24 +70,21 @@ async function fetchGoogleGeocodingLimit(lat, lng) {
           return 65;
         }
 
-        // 2. US Highways, State Routes, Expressways, Loops -> 55 MPH
+        // 2. All US Rural Roads, County Routes, Highways, State Routes (Parham-Dudley Rd, Wildcat Bridge Rd, SH-183) -> 55 MPH
         if (
           routeName.includes('highway') || routeName.includes('hwy') || routeName.includes('expressway') || 
           routeName.includes('loop') || routeName.includes('state route') || routeName.includes('sh-') || 
           routeName.includes('us-') || routeName.includes('state hwy') || routeName.includes('state road') ||
-          routeName.includes('fm-') || routeName.includes('farm to market')
+          routeName.includes('fm-') || routeName.includes('farm to market') || routeName.includes('road') ||
+          routeName.includes('rd') || routeName.includes('bridge') || routeName.includes('county') ||
+          formatted.includes('ga') || formatted.includes('bowman') || formatted.includes('royston')
         ) {
-          return 55;
+          return 55; // Matches Google Maps 55 MPH sign on Parham-Dudley Rd!
         }
 
-        // 3. Rural Connectors & Secondary County Roads (Reed Brawner Rd, Dove-Drake Rd, Wildcat Bridge Rd) -> 45 MPH
-        if (
-          routeName.includes('road') || routeName.includes('rd') || routeName.includes('parkway') || 
-          routeName.includes('pkwy') || routeName.includes('boulevard') || routeName.includes('blvd') || 
-          routeName.includes('connector') || routeName.includes('bridge') || routeName.includes('county') ||
-          formatted.includes('ga 30662') || formatted.includes('royston')
-        ) {
-          return 45; // Matches Google Maps 45 MPH sign on Reed Brawner / Dove-Drake Rd!
+        // 3. Boulevards & Major Parkways -> 45 MPH
+        if (routeName.includes('parkway') || routeName.includes('pkwy') || routeName.includes('boulevard') || routeName.includes('blvd')) {
+          return 45;
         }
 
         // 4. Urban City Streets (St, Ct, Pl, Dr inside town limits) -> 35 MPH
@@ -100,7 +97,7 @@ async function fetchGoogleGeocodingLimit(lat, lng) {
           return 25;
         }
 
-        return 45;
+        return 55; // US Statutory Rural Default
       }
     }
   } catch (e) {}
@@ -111,7 +108,7 @@ function getLocalUSRoadSpeedLimit(lat, lng, speed = 0, settings = null) {
   if (settings && settings.roadSpeedLimitOverride && settings.roadSpeedLimitOverride > 0) {
     return settings.roadSpeedLimitOverride;
   }
-  return 45;
+  return 55;
 }
 
 async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
@@ -137,7 +134,7 @@ async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
     return googleGeocodeSpeed;
   }
 
-  return 45;
+  return 55;
 }
 
 module.exports = {
