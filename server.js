@@ -8,6 +8,15 @@ const PORT = parseInt(process.env.PORT) || 5050;
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
+// Root Health Check for Render Proxy
+app.get('/', (req, res) => {
+  res.status(200).send('OK');
+});
+
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
+
 // In-Memory Database
 const db = {
   active_drivers_list: [],
