@@ -130,11 +130,12 @@ app.post('/api/telemetry', async (req, res) => {
   driver.speed = speed;
   driver.heading = heading;
 
-  // Immediate status transition: If vehicle is moving (> 2 MPH), force status to 'active' or 'violation'
-  if (speed > 2) {
+  // Heavy-duty GPS Jitter Deadband Filter: If speed is 6 MPH or less, vehicle is stopped!
+  if (speed >= 7) {
     driver.status = status === 'violation' ? 'violation' : 'active';
   } else {
-    driver.status = status || 'break';
+    driver.speed = 0;
+    driver.status = status === 'traffic_stop' ? 'traffic_stop' : 'break';
   }
 
   driver.networkStatus = networkStatus || '4g';
