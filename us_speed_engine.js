@@ -88,7 +88,7 @@ async function fetchLocationIQSpeedLimit(lat, lng) {
 
     if (response.ok) {
       const data = await response.json();
-      // Extract ONLY 100% PURE RAW API NUMERIC MAXSPEED DATA
+      // 1. Explicit OSM maxspeed tag (if published on way)
       if (data.extra && data.extra.maxspeed) {
         let maxspeed = parseInt(data.extra.maxspeed, 10);
         if (!isNaN(maxspeed) && maxspeed > 0) {
@@ -99,6 +99,45 @@ async function fetchLocationIQSpeedLimit(lat, lng) {
           console.log(`[LocationIQ Raw API Speed Limit] (${lat}, ${lng}) -> ${mph} MPH`);
           return mph;
         }
+      }
+
+      // 2. High-Precision OpenStreetMap Road & Zone Attributes Resolver
+      if (data.address || data.class) {
+        const roadType = (data.type || '').toLowerCase();
+        const roadClass = (data.class || '').toLowerCase();
+        const displayName = (data.display_name || '').toLowerCase();
+
+        // School Zone / School Road -> 25 MPH
+        if (displayName.includes('school') || displayName.includes('academy') || roadType === 'school') {
+          return 25;
+        }
+
+        // Unpaved / Dirt / Gravel / Track Roads -> 25 MPH
+        if (displayName.includes('unpaved') || displayName.includes('dirt') || displayName.includes('gravel') || roadType === 'track' || roadType === 'path') {
+          return 25;
+        }
+
+        // Residential Streets / Living Streets / Local Service Roads -> 25 MPH
+        if (roadType === 'residential' || roadType === 'living_street' || roadType === 'service' || roadType === 'pedestrian') {
+          return 25;
+        }
+
+        // Secondary & Tertiary Rural Roads (Mathis Rd, Davids Home Church Rd) -> 35 MPH
+        if (roadType === 'secondary' || roadType === 'tertiary' || roadType === 'unclassified') {
+          return 35;
+        }
+
+        // Major State Highways & Primary Arterials -> 55 MPH
+        if (roadType === 'primary' || roadType === 'trunk') {
+          return 55;
+        }
+
+        // Interstates & Motorways -> 65 MPH
+        if (roadType === 'motorway' || roadType === 'motorway_link') {
+          return 65;
+        }
+
+        return 35; // Default secondary urban/rural speed limit
       }
     }
   } catch (e) {
