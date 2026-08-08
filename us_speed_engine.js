@@ -13,10 +13,48 @@
 
 const GOOGLE_API_KEY = 'AIzaSyCf8UyxITXAwMGyHJg1oeZ_BoSgAkvoZ1Y';
 const HERE_API_KEY = 'tQAbtOSDyC_ruvTlGZ0eUdBXucVnFLyHV6Glhkbx-lE';
+const TOMTOM_API_KEY = '6hNDEyurATkWloBlTl52vX9oS1Aw7Ue5';
 const speedCache = new Map();
 
 /**
- * Priority #1: Query HERE Technologies Router API for Raw Speed Limits
+ * Priority #1: Query TomTom Routing API for Raw Speed Limits (75,000 Free/Mo)
+ */
+async function fetchTomTomSpeedLimit(lat, lng) {
+  if (!lat || !lng) return null;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1800);
+
+    const destLat = lat + 0.0005;
+    const destLng = lng + 0.0005;
+    const url = `https://api.tomtom.com/routing/1/calculateRoute/${lat},${lng}:${destLat},${destLng}/json?key=${TOMTOM_API_KEY}&vehicleMaxSpeed=120&sectionType=speedLimit`;
+
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.routes && data.routes[0] && data.routes[0].sections) {
+        for (const section of data.routes[0].sections) {
+          if (section.maxSpeedLimitInKmh) {
+            const mph = Math.round(section.maxSpeedLimitInKmh * 0.621371);
+            if (!isNaN(mph) && mph > 0) {
+              console.log(`[TomTom API Speed Limit] (${lat}, ${lng}) -> ${mph} MPH`);
+              return mph;
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('TomTom API fetch error:', e);
+  }
+  return null;
+}
+
+/**
+ * Priority #2: Query HERE Technologies Router API for Raw Speed Limits
  */
 async function fetchHereSpeedLimit(lat, lng) {
   if (!lat || !lng) return null;
@@ -156,7 +194,14 @@ async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
     return cached.speedLimit;
   }
 
-  // Priority #1: HERE Technologies API Speed Limit
+  // Priority #1: TomTom API Speed Limit (75,000 Free/Mo)
+  const tomTomSpeed = await fetchTomTomSpeedLimit(lat, lng);
+  if (tomTomSpeed !== null) {
+    speedCache.set(cacheKey, { speedLimit: tomTomSpeed, timestamp: Date.now() });
+    return tomTomSpeed;
+  }
+
+  // Priority #2: HERE Technologies API Speed Limit (2,500 Free/Mo)
   const hereSpeed = await fetchHereSpeedLimit(lat, lng);
   if (hereSpeed !== null) {
     speedCache.set(cacheKey, { speedLimit: hereSpeed, timestamp: Date.now() });
