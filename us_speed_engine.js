@@ -141,7 +141,30 @@ async function fetchTomTomSpeedLimit(lat, lng) {
     console.warn('TomTom API fetch error:', e);
   }
   return null;
+function getLocalUSRoadSpeedLimit(lat, lng, speed = 0, settings = null) {
+  if (settings && settings.roadSpeedLimitOverride && settings.roadSpeedLimitOverride > 0) {
+    return settings.roadSpeedLimitOverride;
+  }
+  return 35;
 }
+
+async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
+  if (settings && settings.roadSpeedLimitOverride && settings.roadSpeedLimitOverride > 0) {
+    return settings.roadSpeedLimitOverride;
+  }
+
+  const cacheKey = `${lat ? lat.toFixed(4) : 0},${lng ? lng.toFixed(4) : 0}`;
+  const cached = speedCache.get(cacheKey);
+  // Fast 10-Second Speed Limit Refresh
+  if (cached && (Date.now() - cached.timestamp < 10000)) {
+    return cached.speedLimit;
+  }
+
+  // Memory Pruning: Keep cache size capped at 2,000 items
+  if (speedCache.size > 2000) {
+    const firstKey = speedCache.keys().next().value;
+    speedCache.delete(firstKey);
+  }
 
   // Priority #1: LocationIQ / OpenStreetMap API Speed Limit
   const locationIQSpeed = await fetchLocationIQSpeedLimit(lat, lng);
@@ -150,25 +173,18 @@ async function fetchTomTomSpeedLimit(lat, lng) {
     return locationIQSpeed;
   }
 
-  // Priority #3: TomTom API Speed Limit
+  // Priority #2: TomTom API Speed Limit
   const tomTomSpeed = await fetchTomTomSpeedLimit(lat, lng);
   if (tomTomSpeed !== null) {
     speedCache.set(cacheKey, { speedLimit: tomTomSpeed, timestamp: Date.now() });
     return tomTomSpeed;
   }
 
-  // Priority #4: Mapbox API Speed Limit & Matching
+  // Priority #3: Mapbox API Speed Limit & Matching
   const mapboxSpeed = await fetchMapboxSpeedLimit(lat, lng);
   if (mapboxSpeed !== null) {
     speedCache.set(cacheKey, { speedLimit: mapboxSpeed, timestamp: Date.now() });
     return mapboxSpeed;
-  }
-
-  // Priority #5: Google Roads API Speed Limit
-  const googleRoadsSpeed = await fetchGoogleRoadsSpeedLimit(lat, lng);
-  if (googleRoadsSpeed !== null) {
-    speedCache.set(cacheKey, { speedLimit: googleRoadsSpeed, timestamp: Date.now() });
-    return googleRoadsSpeed;
   }
 
   return 35;
