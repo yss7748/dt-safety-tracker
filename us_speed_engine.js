@@ -140,18 +140,6 @@ async function fetchTomTomSpeedLimit(lat, lng) {
   return null;
 }
 
-function getLocalUSRoadSpeedLimit(lat, lng, speed = 0, settings = null) {
-  if (settings && settings.roadSpeedLimitOverride && settings.roadSpeedLimitOverride > 0) {
-    return settings.roadSpeedLimitOverride;
-  }
-  return 35;
-}
-
-async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
-  if (settings && settings.roadSpeedLimitOverride && settings.roadSpeedLimitOverride > 0) {
-    return settings.roadSpeedLimitOverride;
-  }
-
 const fs = require('fs');
 const path = require('path');
 
@@ -180,9 +168,22 @@ function getSelfHostedSpeedLimit(lat, lng) {
   return null;
 }
 
+function getLocalUSRoadSpeedLimit(lat, lng, speed = 0, settings = null) {
+  if (settings && settings.roadSpeedLimitOverride && settings.roadSpeedLimitOverride > 0) {
+    return settings.roadSpeedLimitOverride;
+  }
+  return 35;
+}
+
+async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
+  if (settings && settings.roadSpeedLimitOverride && settings.roadSpeedLimitOverride > 0) {
+    return settings.roadSpeedLimitOverride;
+  }
+
   // Priority #0: Check Self-Hosted Pre-Loaded Speed Database (0ms Instant / $0.00 Cost)
   const selfHostedSpeed = getSelfHostedSpeedLimit(lat, lng);
   if (selfHostedSpeed !== null) {
+    const cacheKey = `${lat ? lat.toFixed(4) : 0},${lng ? lng.toFixed(4) : 0}`;
     speedCache.set(cacheKey, { speedLimit: selfHostedSpeed, timestamp: Date.now() });
     return selfHostedSpeed;
   }
