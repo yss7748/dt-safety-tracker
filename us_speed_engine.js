@@ -39,13 +39,17 @@ async function fetchMapboxSpeedLimit(lat, lng) {
 
     if (response.ok) {
       const data = await response.json();
-      if (data.tracepoints && data.tracepoints.length > 0 && data.tracepoints[0].name) {
-        const routeName = data.tracepoints[0].name.toLowerCase();
-        if (routeName.includes('i-') || routeName.includes('interstate') || routeName.includes('freeway')) return 65;
-        if (routeName.includes('ga-') || routeName.includes('hwy') || routeName.includes('highway') || routeName.includes('us-')) return 55;
-        if (routeName.includes('blvd') || routeName.includes('pkwy') || routeName.includes('expressway')) return 45;
-        if (routeName.includes('lane') || routeName.includes('ln') || routeName.includes('court') || routeName.includes('woods')) return 25;
-        return 35;
+      if (data.matchings && data.matchings.length > 0 && data.matchings[0].legs) {
+        for (const leg of data.matchings[0].legs) {
+          if (leg.annotation && leg.annotation.maxspeed) {
+            for (const item of leg.annotation.maxspeed) {
+              if (item.speed) {
+                const mph = Math.round(item.speed * 0.621371);
+                if (!isNaN(mph) && mph > 0) return mph;
+              }
+            }
+          }
+        }
       }
     }
   } catch (e) {
@@ -57,13 +61,12 @@ async function fetchMapboxSpeedLimit(lat, lng) {
 let lastLocationIQTime = 0;
 
 /**
- * Priority #1: Query LocationIQ API for Speed Limits & Geocoding (300,000 Free/Mo)
+ * Priority #1: Query LocationIQ API for Raw Speed Limits (300,000 Free/Mo)
  */
 async function fetchLocationIQSpeedLimit(lat, lng) {
   if (!lat || !lng) return null;
 
-  // Rate Limiting Guard: LocationIQ free tier permits max 2 req/sec.
-  // Enforce 800ms spacing between calls to eliminate 429 per-minute rate limits.
+  // Rate Limiting Guard: Enforce 800ms spacing between calls to eliminate 429 rate limits.
   const now = Date.now();
   if (now - lastLocationIQTime < 800) {
     return null; // Instantly fall through to Mapbox / TomTom / HERE
@@ -85,6 +88,7 @@ async function fetchLocationIQSpeedLimit(lat, lng) {
 
     if (response.ok) {
       const data = await response.json();
+      // Extract ONLY 100% PURE RAW API NUMERIC MAXSPEED DATA
       if (data.extra && data.extra.maxspeed) {
         let maxspeed = parseInt(data.extra.maxspeed, 10);
         if (!isNaN(maxspeed) && maxspeed > 0) {
@@ -92,25 +96,9 @@ async function fetchLocationIQSpeedLimit(lat, lng) {
             return maxspeed;
           }
           const mph = Math.round(maxspeed * 0.621371);
-          console.log(`[LocationIQ API Speed Limit] (${lat}, ${lng}) -> ${mph} MPH`);
+          console.log(`[LocationIQ Raw API Speed Limit] (${lat}, ${lng}) -> ${mph} MPH`);
           return mph;
         }
-      }
-      
-      if (data.address && data.address.road) {
-        const routeName = data.address.road.toLowerCase();
-        if (routeName.includes('i-') || routeName.includes('interstate') || routeName.includes('freeway')) return 65;
-        if (routeName.includes('ga-') || routeName.includes('hwy') || routeName.includes('highway') || routeName.includes('us-')) return 55;
-        if (routeName.includes('blvd') || routeName.includes('pkwy') || routeName.includes('expressway')) return 45;
-        if (
-          routeName.includes('street') || routeName.includes('st') || 
-          routeName.includes('cook') || routeName.includes('church') || routeName.includes('bond') ||
-          routeName.includes('lane') || routeName.includes('ln') || 
-          routeName.includes('court') || routeName.includes('ct') || 
-          routeName.includes('drive') || routeName.includes('dr') ||
-          routeName.includes('way') || routeName.includes('place') || routeName.includes('pl')
-        ) return 25; // Matches Google Maps 25 MPH sign on Cook St & Church St!
-        return 35;
       }
     }
   } catch (e) {
@@ -229,55 +217,7 @@ async function fetchGoogleRoadsSpeedLimit(lat, lng) {
 /**
  * 100% Precision Spatial Resolver using Google Geocoding API
  */
-async function fetchGoogleGeocodingLimit(lat, lng) {
-  if (!lat || !lng) return null;
 
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 1800);
-
-    const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_API_KEY}`;
-    const response = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeout);
-
-    if (response.ok) {
-      const data = await response.json();
-      if (data.results && data.results.length > 0) {
-        const routeObj = data.results.find(r => r.types.includes('route') || r.types.includes('street_address'));
-        const routeName = (routeObj ? routeObj.formatted_address : data.results[0].formatted_address).toLowerCase();
-
-        // 1. Interstates & Freeways (I-35, I-20, I-85) -> 65 - 70 MPH
-        if (routeName.includes('i-') || routeName.includes('interstate') || routeName.includes('freeway')) {
-          return 65;
-        }
-
-        // 2. State Highways & Numbered Routes (GA 172, US 75, SH 183, FM 1960) -> 55 MPH
-        if (
-          routeName.includes('ga-') || routeName.includes('ga ') || 
-          routeName.includes('hwy') || routeName.includes('highway') || 
-          routeName.includes('us-') || routeName.includes('us ') || 
-          routeName.includes('sh-') || routeName.includes('fm-') || 
-          routeName.includes('route') || routeName.includes('state route')
-        ) {
-          return 55;
-        }
-
-        // 3. Major Boulevards, Parkways, & Expressways -> 45 MPH
-        if (
-          routeName.includes('blvd') || routeName.includes('boulevard') || 
-          routeName.includes('pkwy') || routeName.includes('parkway') || 
-          routeName.includes('expwy') || routeName.includes('expressway')
-        ) {
-          return 45;
-        }
-
-        // 4. Local City & County Roads (Della Slaton Rd, Simmons Rd, Human Rd, Oak St) -> 35 MPH
-        return 35;
-      }
-    }
-  } catch (e) {}
-  return null;
-}
 
 function getLocalUSRoadSpeedLimit(lat, lng, speed = 0, settings = null) {
   if (settings && settings.roadSpeedLimitOverride && settings.roadSpeedLimitOverride > 0) {
