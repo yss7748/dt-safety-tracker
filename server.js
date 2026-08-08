@@ -307,6 +307,9 @@ app.post('/api/alert-driver', (req, res) => {
     message: alertMessage || ''
   };
 
+  res.json({ success: true, coordinatorAlert: driver.coordinatorAlert });
+});
+
 // POST /api/fleet-break (Trigger fleet-wide break command for all drivers)
 app.post('/api/fleet-break', (req, res) => {
   const { breakDurationMinutes } = req.body;
