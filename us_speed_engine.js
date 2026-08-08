@@ -92,53 +92,14 @@ async function fetchLocationIQSpeedLimit(lat, lng) {
       if (data.extra && data.extra.maxspeed) {
         let maxspeed = parseInt(data.extra.maxspeed, 10);
         if (!isNaN(maxspeed) && maxspeed > 0) {
-          if (data.extra.maxspeed.includes('mph')) {
-            return maxspeed;
-          }
-          const mph = Math.round(maxspeed * 0.621371);
-          console.log(`[LocationIQ Raw API Speed Limit] (${lat}, ${lng}) -> ${mph} MPH`);
+          const mph = data.extra.maxspeed.includes('mph') ? maxspeed : Math.round(maxspeed * 0.621371);
+          console.log(`[OSM Explicit Maxspeed] (${lat}, ${lng}) -> ${mph} MPH`);
           return mph;
         }
       }
 
-      // 2. High-Precision OpenStreetMap Road & Zone Attributes Resolver
-      if (data.address || data.class) {
-        const roadType = (data.type || '').toLowerCase();
-        const roadClass = (data.class || '').toLowerCase();
-        const displayName = (data.display_name || '').toLowerCase();
-
-        // School Zone / School Road -> 20 MPH
-        if (displayName.includes('school') || displayName.includes('academy') || roadType === 'school' || displayName.includes('elementary') || displayName.includes('high school')) {
-          return 20;
-        }
-
-        // Unpaved / Dirt / Gravel / Track Roads -> 25 MPH
-        if (displayName.includes('unpaved') || displayName.includes('dirt') || displayName.includes('gravel') || roadType === 'track' || roadType === 'path') {
-          return 25;
-        }
-
-        // Residential Streets / Living Streets / Local Service Roads -> 25 MPH
-        if (roadType === 'residential' || roadType === 'living_street' || roadType === 'service' || roadType === 'pedestrian') {
-          return 25;
-        }
-
-        // Secondary & Tertiary Rural Roads (Mathis Rd, Davids Home Church Rd) -> 35 MPH
-        if (roadType === 'secondary' || roadType === 'tertiary' || roadType === 'unclassified') {
-          return 35;
-        }
-
-        // Major State Highways & Primary Arterials -> 55 MPH
-        if (roadType === 'primary' || roadType === 'trunk') {
-          return 55;
-        }
-
-        // Interstates & Motorways -> 65 MPH
-        if (roadType === 'motorway' || roadType === 'motorway_link') {
-          return 65;
-        }
-
-        return 35; // Default secondary urban/rural speed limit
-      }
+      // If OSM has unmapped road / no maxspeed tag, return null to failover to HERE API
+      return null;
     }
   } catch (e) {
     console.warn('LocationIQ API fetch error:', e);
@@ -283,18 +244,18 @@ async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
     speedCache.delete(firstKey);
   }
 
-  // Priority #1 (TESTING MODE): OpenStreetMap / LocationIQ OSM Engine
-  const locationIQSpeed = await fetchLocationIQSpeedLimit(lat, lng);
-  if (locationIQSpeed !== null) {
-    speedCache.set(cacheKey, { speedLimit: locationIQSpeed, timestamp: Date.now() });
-    return locationIQSpeed;
-  }
-
-  // Priority #2: HERE Technologies API Speed Limit
+  // Priority #1: HERE Technologies API Raw Automotive Speed Limit Spans (25 MPH on Cook St / Church St)
   const hereSpeed = await fetchHereSpeedLimit(lat, lng);
   if (hereSpeed !== null) {
     speedCache.set(cacheKey, { speedLimit: hereSpeed, timestamp: Date.now() });
     return hereSpeed;
+  }
+
+  // Priority #2: LocationIQ API Speed Limit
+  const locationIQSpeed = await fetchLocationIQSpeedLimit(lat, lng);
+  if (locationIQSpeed !== null) {
+    speedCache.set(cacheKey, { speedLimit: locationIQSpeed, timestamp: Date.now() });
+    return locationIQSpeed;
   }
 
   // Priority #3: TomTom API Speed Limit
@@ -311,18 +272,11 @@ async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
     return mapboxSpeed;
   }
 
-  // Priority #2: Google Roads API Speed Limit
+  // Priority #5: Google Roads API Speed Limit
   const googleRoadsSpeed = await fetchGoogleRoadsSpeedLimit(lat, lng);
   if (googleRoadsSpeed !== null) {
     speedCache.set(cacheKey, { speedLimit: googleRoadsSpeed, timestamp: Date.now() });
     return googleRoadsSpeed;
-  }
-
-  // Priority #3: Google Geocoding Spatial Classifier
-  const googleGeocodeSpeed = await fetchGoogleGeocodingLimit(lat, lng);
-  if (googleGeocodeSpeed !== null) {
-    speedCache.set(cacheKey, { speedLimit: googleGeocodeSpeed, timestamp: Date.now() });
-    return googleGeocodeSpeed;
   }
 
   return 35;
