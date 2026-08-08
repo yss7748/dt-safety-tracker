@@ -162,8 +162,9 @@ loadSelfHostedSpeedDb();
 function getSelfHostedSpeedLimit(lat, lng) {
   if (!lat || !lng) return null;
   const gridKey = `${lat.toFixed(3)},${lng.toFixed(3)}`;
-  if (selfHostedSpeedDb[gridKey]) {
-    return selfHostedSpeedDb[gridKey].speedLimit;
+  const val = selfHostedSpeedDb[gridKey];
+  if (val !== undefined && val !== null) {
+    return typeof val === 'object' ? val.speedLimit : val;
   }
   return null;
 }
