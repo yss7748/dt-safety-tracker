@@ -117,7 +117,7 @@ app.post('/api/register', (req, res) => {
 
 // POST /api/telemetry
 app.post('/api/telemetry', async (req, res) => {
-  const { imei, lat, lng, speed, heading, status, networkStatus, violations, lastBrakeTime } = req.body;
+  const { imei, lat, lng, speed, heading, status, networkStatus, violations, lastBrakeTime, testDelayReason, breakInfo } = req.body;
   if (!imei) return res.status(400).json({ error: 'Missing IMEI' });
 
   const driver = db.drivers[imei];
@@ -129,13 +129,24 @@ app.post('/api/telemetry', async (req, res) => {
   driver.lng = lng;
   driver.speed = speed;
   driver.heading = heading;
+  if (testDelayReason !== undefined) {
+    driver.testDelayReason = testDelayReason;
+  }
+  if (breakInfo !== undefined) {
+    driver.breakInfo = breakInfo;
+  }
 
   // Heavy-duty GPS Jitter Deadband Filter: If speed is 6 MPH or less, vehicle is stopped!
   if (speed >= 7) {
     driver.status = status === 'violation' ? 'violation' : 'active';
   } else {
     driver.speed = 0;
-    driver.status = status === 'traffic_stop' ? 'traffic_stop' : 'break';
+    // Suppress stationary status during active break
+    if (breakInfo && (breakInfo.lunchRemaining > 0 || breakInfo.periodicRemaining > 0)) {
+      driver.status = 'break';
+    } else {
+      driver.status = status === 'traffic_stop' ? 'traffic_stop' : 'break';
+    }
   }
 
   driver.networkStatus = networkStatus || '4g';
@@ -296,7 +307,27 @@ app.post('/api/alert-driver', (req, res) => {
     message: alertMessage || ''
   };
 
-  res.json({ success: true, driver });
+// POST /api/fleet-break (Trigger fleet-wide break command for all drivers)
+app.post('/api/fleet-break', (req, res) => {
+  const { breakDurationMinutes } = req.body;
+  const duration = parseInt(breakDurationMinutes) || 30;
+
+  Object.keys(db.drivers).forEach(imei => {
+    const driver = db.drivers[imei];
+    driver.coordinatorAlert = {
+      timestamp: Date.now(),
+      type: 'break',
+      message: `Coordinator has initiated a mandatory ${duration}-minute fleet break. Please pull over safely.`
+    };
+    driver.extension = {
+      status: 'approved',
+      approvedDuration: duration,
+      approvedTime: Date.now(),
+      remainingSeconds: duration * 60
+    };
+  });
+
+  res.json({ success: true, count: Object.keys(db.drivers).length, duration });
 });
 
 // POST /api/clear-logs
