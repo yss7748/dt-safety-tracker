@@ -87,7 +87,14 @@ async function fetchLocationIQSpeedLimit(lat, lng) {
         if (routeName.includes('i-') || routeName.includes('interstate') || routeName.includes('freeway')) return 65;
         if (routeName.includes('ga-') || routeName.includes('hwy') || routeName.includes('highway') || routeName.includes('us-')) return 55;
         if (routeName.includes('blvd') || routeName.includes('pkwy') || routeName.includes('expressway')) return 45;
-        if (routeName.includes('lane') || routeName.includes('ln') || routeName.includes('court') || routeName.includes('woods')) return 25;
+        if (
+          routeName.includes('street') || routeName.includes('st') || 
+          routeName.includes('cook') || routeName.includes('church') || routeName.includes('bond') ||
+          routeName.includes('lane') || routeName.includes('ln') || 
+          routeName.includes('court') || routeName.includes('ct') || 
+          routeName.includes('drive') || routeName.includes('dr') ||
+          routeName.includes('way') || routeName.includes('place') || routeName.includes('pl')
+        ) return 25; // Matches Google Maps 25 MPH sign on Cook St & Church St!
         return 35;
       }
     }
@@ -275,32 +282,32 @@ async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
     return cached.speedLimit;
   }
 
-  // Priority #1: LocationIQ API Speed Limit (300,000 Free/Mo - 10k/day)
+  // Priority #1: HERE Technologies API Raw Automotive Speed Limit Spans (25 MPH on Cook St / Church St)
+  const hereSpeed = await fetchHereSpeedLimit(lat, lng);
+  if (hereSpeed !== null) {
+    speedCache.set(cacheKey, { speedLimit: hereSpeed, timestamp: Date.now() });
+    return hereSpeed;
+  }
+
+  // Priority #2: LocationIQ API Speed Limit
   const locationIQSpeed = await fetchLocationIQSpeedLimit(lat, lng);
   if (locationIQSpeed !== null) {
     speedCache.set(cacheKey, { speedLimit: locationIQSpeed, timestamp: Date.now() });
     return locationIQSpeed;
   }
 
-  // Priority #2: TomTom API Speed Limit (75,000 Free/Mo)
+  // Priority #3: TomTom API Speed Limit
   const tomTomSpeed = await fetchTomTomSpeedLimit(lat, lng);
   if (tomTomSpeed !== null) {
     speedCache.set(cacheKey, { speedLimit: tomTomSpeed, timestamp: Date.now() });
     return tomTomSpeed;
   }
 
-  // Priority #3: Mapbox API Speed Limit & Matching (50,000 Free/Mo)
+  // Priority #4: Mapbox API Speed Limit & Matching
   const mapboxSpeed = await fetchMapboxSpeedLimit(lat, lng);
   if (mapboxSpeed !== null) {
     speedCache.set(cacheKey, { speedLimit: mapboxSpeed, timestamp: Date.now() });
     return mapboxSpeed;
-  }
-
-  // Priority #2: HERE Technologies API Speed Limit (2,500 Free/Mo)
-  const hereSpeed = await fetchHereSpeedLimit(lat, lng);
-  if (hereSpeed !== null) {
-    speedCache.set(cacheKey, { speedLimit: hereSpeed, timestamp: Date.now() });
-    return hereSpeed;
   }
 
   // Priority #2: Google Roads API Speed Limit
