@@ -157,8 +157,8 @@ async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
 
   const cacheKey = `${lat ? lat.toFixed(4) : 0},${lng ? lng.toFixed(4) : 0}`;
   const cached = speedCache.get(cacheKey);
-  // Fast 10-Second Speed Limit Refresh
-  if (cached && (Date.now() - cached.timestamp < 10000)) {
+  // Smart 60-Second Spatial Cache (Preserves 100% of Free API Quotas)
+  if (cached && (Date.now() - cached.timestamp < 60000)) {
     return cached.speedLimit;
   }
 
