@@ -141,6 +141,8 @@ async function fetchTomTomSpeedLimit(lat, lng) {
     console.warn('TomTom API fetch error:', e);
   }
   return null;
+}
+
 function getLocalUSRoadSpeedLimit(lat, lng, speed = 0, settings = null) {
   if (settings && settings.roadSpeedLimitOverride && settings.roadSpeedLimitOverride > 0) {
     return settings.roadSpeedLimitOverride;
