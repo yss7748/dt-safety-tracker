@@ -1,18 +1,13 @@
 {
   "name": "dt-safety-backend-worker",
   "version": "1.0.0",
-  "description": "Cloudflare Worker backend for DT Safety Tracker using KV store",
-  "main": "src/index.js",
+  "description": "Express backend for DT Safety Tracker",
+  "main": "server.js",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
     "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.19.2",
     "cors": "^2.8.5"
-  },
-  "devDependencies": {
-    "wrangler": "^3.114.17"
   }
 }
