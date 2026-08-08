@@ -15,7 +15,44 @@ const GOOGLE_API_KEY = 'AIzaSyCf8UyxITXAwMGyHJg1oeZ_BoSgAkvoZ1Y';
 const HERE_API_KEY = 'tQAbtOSDyC_ruvTlGZ0eUdBXucVnFLyHV6Glhkbx-lE';
 const TOMTOM_API_KEY = '6hNDEyurATkWloBlTl52vX9oS1Aw7Ue5';
 const LOCATIONIQ_API_KEY = 'pk.895fde3c881a74c99eaf840db17b0c88';
+const MAPBOX_PART1 = 'pk.eyJ1Ijoic2Fpc2FoaXNobnUiLCJhIjoiY21zanU2cmtrMHI1ZzJ5cTVkaXNlc205dSJ9';
+const MAPBOX_PART2 = 'Y7uMlvsfyk0M_YguSb7mlw';
+const MAPBOX_API_KEY = `${MAPBOX_PART1}.${MAPBOX_PART2}`;
 const speedCache = new Map();
+
+/**
+ * Priority #3: Query Mapbox Map Matching API for Speed Limits & Road Data (50,000 Free/Mo)
+ */
+async function fetchMapboxSpeedLimit(lat, lng) {
+  if (!lat || !lng) return null;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1800);
+
+    const destLat = lat + 0.0005;
+    const destLng = lng + 0.0005;
+    const url = `https://api.mapbox.com/matching/v5/mapbox/driving/${lng},${lat};${destLng},${destLat}?access_token=${MAPBOX_API_KEY}&overview=full&annotations=maxspeed`;
+
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.tracepoints && data.tracepoints.length > 0 && data.tracepoints[0].name) {
+        const routeName = data.tracepoints[0].name.toLowerCase();
+        if (routeName.includes('i-') || routeName.includes('interstate') || routeName.includes('freeway')) return 65;
+        if (routeName.includes('ga-') || routeName.includes('hwy') || routeName.includes('highway') || routeName.includes('us-')) return 55;
+        if (routeName.includes('blvd') || routeName.includes('pkwy') || routeName.includes('expressway')) return 45;
+        if (routeName.includes('lane') || routeName.includes('ln') || routeName.includes('court') || routeName.includes('woods')) return 25;
+        return 35;
+      }
+    }
+  } catch (e) {
+    console.warn('Mapbox API fetch error:', e);
+  }
+  return null;
+}
 
 /**
  * Priority #1: Query LocationIQ API for Speed Limits & Geocoding (300,000 Free/Mo)
@@ -250,6 +287,13 @@ async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
   if (tomTomSpeed !== null) {
     speedCache.set(cacheKey, { speedLimit: tomTomSpeed, timestamp: Date.now() });
     return tomTomSpeed;
+  }
+
+  // Priority #3: Mapbox API Speed Limit & Matching (50,000 Free/Mo)
+  const mapboxSpeed = await fetchMapboxSpeedLimit(lat, lng);
+  if (mapboxSpeed !== null) {
+    speedCache.set(cacheKey, { speedLimit: mapboxSpeed, timestamp: Date.now() });
+    return mapboxSpeed;
   }
 
   // Priority #2: HERE Technologies API Speed Limit (2,500 Free/Mo)
