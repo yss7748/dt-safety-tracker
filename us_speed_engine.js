@@ -31,18 +31,18 @@ async function fetchMapboxSpeedLimit(lat, lng) {
 
     const destLat = lat + 0.0005;
     const destLng = lng + 0.0005;
-    const url = `https://api.mapbox.com/matching/v5/mapbox/driving/${lng},${lat};${destLng},${destLat}?access_token=${MAPBOX_API_KEY}&overview=full&annotations=maxspeed`;
+    const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${lng},${lat};${destLng},${destLat}?access_token=${MAPBOX_API_KEY}&annotations=maxspeed&overview=full`;
 
     const response = await fetch(url, { signal: controller.signal });
     clearTimeout(timeout);
 
     if (response.ok) {
       const data = await response.json();
-      if (data.matchings && data.matchings.length > 0 && data.matchings[0].legs) {
-        for (const leg of data.matchings[0].legs) {
+      if (data.routes && data.routes.length > 0 && data.routes[0].legs) {
+        for (const leg of data.routes[0].legs) {
           if (leg.annotation && leg.annotation.maxspeed) {
             for (const item of leg.annotation.maxspeed) {
-              if (item.speed) {
+              if (item.speed && !item.unknown) {
                 const mph = Math.round(item.speed * 0.621371);
                 if (!isNaN(mph) && mph > 0) return mph;
               }
@@ -107,7 +107,7 @@ async function fetchLocationIQSpeedLimit(lat, lng) {
 }
 
 /**
- * Priority #2: Query TomTom Routing API for Raw Speed Limits (75,000 Free/Mo)
+ * Priority #2: Query TomTom Reverse Geocoding API for Speed Limits (75,000 Free/Mo)
  */
 async function fetchTomTomSpeedLimit(lat, lng) {
   if (!lat || !lng) return null;
@@ -116,23 +116,20 @@ async function fetchTomTomSpeedLimit(lat, lng) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 1800);
 
-    const destLat = lat + 0.0005;
-    const destLng = lng + 0.0005;
-    const url = `https://api.tomtom.com/routing/1/calculateRoute/${lat},${lng}:${destLat},${destLng}/json?key=${TOMTOM_API_KEY}&vehicleMaxSpeed=120&sectionType=speedLimit`;
+    const url = `https://api.tomtom.com/search/2/reverseGeocode/${lat},${lng}.json?key=${TOMTOM_API_KEY}&returnSpeedLimit=true&returnRoadUse=true`;
 
     const response = await fetch(url, { signal: controller.signal });
     clearTimeout(timeout);
 
     if (response.ok) {
       const data = await response.json();
-      if (data.routes && data.routes[0] && data.routes[0].sections) {
-        for (const section of data.routes[0].sections) {
-          if (section.maxSpeedLimitInKmh) {
-            const mph = Math.round(section.maxSpeedLimitInKmh * 0.621371);
-            if (!isNaN(mph) && mph > 0) {
-              console.log(`[TomTom API Speed Limit] (${lat}, ${lng}) -> ${mph} MPH`);
-              return mph;
-            }
+      if (data.addresses && data.addresses.length > 0) {
+        const addr = data.addresses[0].address;
+        if (addr && addr.speedLimit) {
+          const mph = parseFloat(addr.speedLimit.replace(/[^0-9.]/g, ''));
+          if (!isNaN(mph) && mph > 0) {
+            console.log(`[TomTom Reverse Geocode Speed] (${lat}, ${lng}) -> ${mph} MPH`);
+            return Math.round(mph);
           }
         }
       }
@@ -155,17 +152,39 @@ async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
     return settings.roadSpeedLimitOverride;
   }
 
-  const cacheKey = `${lat ? lat.toFixed(4) : 0},${lng ? lng.toFixed(4) : 0}`;
-  const cached = speedCache.get(cacheKey);
-  // Smart 60-Second Spatial Cache (Preserves 100% of Free API Quotas)
-  if (cached && (Date.now() - cached.timestamp < 60000)) {
-    return cached.speedLimit;
-  }
+const fs = require('fs');
+const path = require('path');
 
-  // Memory Pruning: Keep cache size capped at 2,000 items
-  if (speedCache.size > 2000) {
-    const firstKey = speedCache.keys().next().value;
-    speedCache.delete(firstKey);
+// Self-Hosted Speed Limit Database file
+const DB_FILE = path.join(__dirname, 'speed_limits_db.json');
+let selfHostedSpeedDb = {};
+
+function loadSelfHostedSpeedDb() {
+  if (fs.existsSync(DB_FILE)) {
+    try {
+      selfHostedSpeedDb = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+      console.log(`Loaded self-hosted speed DB with ${Object.keys(selfHostedSpeedDb).length} pre-loaded road tiles.`);
+    } catch (e) {
+      console.warn('Failed to parse speed_limits_db.json:', e);
+    }
+  }
+}
+loadSelfHostedSpeedDb();
+
+function getSelfHostedSpeedLimit(lat, lng) {
+  if (!lat || !lng) return null;
+  const gridKey = `${lat.toFixed(3)},${lng.toFixed(3)}`;
+  if (selfHostedSpeedDb[gridKey]) {
+    return selfHostedSpeedDb[gridKey].speedLimit;
+  }
+  return null;
+}
+
+  // Priority #0: Check Self-Hosted Pre-Loaded Speed Database (0ms Instant / $0.00 Cost)
+  const selfHostedSpeed = getSelfHostedSpeedLimit(lat, lng);
+  if (selfHostedSpeed !== null) {
+    speedCache.set(cacheKey, { speedLimit: selfHostedSpeed, timestamp: Date.now() });
+    return selfHostedSpeed;
   }
 
   // Priority #1: LocationIQ / OpenStreetMap API Speed Limit
