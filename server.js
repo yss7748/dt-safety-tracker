@@ -3,7 +3,7 @@ const cors = require('cors');
 const { getUSRoadSpeedLimit, getUSRoadSpeedLimitAsync } = require('./us_speed_engine');
 
 const app = express();
-const PORT = process.env.PORT || 5050;
+const PORT = parseInt(process.env.PORT) || 5050;
 
 app.use(cors({ origin: '*' }));
 app.use(express.json());
