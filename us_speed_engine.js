@@ -54,11 +54,21 @@ async function fetchMapboxSpeedLimit(lat, lng) {
   return null;
 }
 
+let lastLocationIQTime = 0;
+
 /**
  * Priority #1: Query LocationIQ API for Speed Limits & Geocoding (300,000 Free/Mo)
  */
 async function fetchLocationIQSpeedLimit(lat, lng) {
   if (!lat || !lng) return null;
+
+  // Rate Limiting Guard: LocationIQ free tier permits max 2 req/sec.
+  // Enforce 800ms spacing between calls to eliminate 429 per-minute rate limits.
+  const now = Date.now();
+  if (now - lastLocationIQTime < 800) {
+    return null; // Instantly fall through to Mapbox / TomTom / HERE
+  }
+  lastLocationIQTime = now;
 
   try {
     const controller = new AbortController();
@@ -67,6 +77,11 @@ async function fetchLocationIQSpeedLimit(lat, lng) {
     const url = `https://us1.locationiq.com/v1/reverse.php?key=${LOCATIONIQ_API_KEY}&lat=${lat}&lon=${lng}&format=json&extra=maxspeed`;
     const response = await fetch(url, { signal: controller.signal });
     clearTimeout(timeout);
+
+    if (response.status === 429) {
+      console.warn('[LocationIQ 429 Rate Limited] Seamlessly failing over to next provider...');
+      return null;
+    }
 
     if (response.ok) {
       const data = await response.json();
