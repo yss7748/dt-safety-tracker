@@ -12,7 +12,45 @@
  */
 
 const GOOGLE_API_KEY = 'AIzaSyCf8UyxITXAwMGyHJg1oeZ_BoSgAkvoZ1Y';
+const HERE_API_KEY = 'tQAbtOSDyC_ruvTlGZ0eUdBXucVnFLyHV6Glhkbx-lE';
 const speedCache = new Map();
+
+/**
+ * Priority #1: Query HERE Technologies Router API for Raw Speed Limits
+ */
+async function fetchHereSpeedLimit(lat, lng) {
+  if (!lat || !lng) return null;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1800);
+
+    const destLat = lat + 0.0005;
+    const destLng = lng + 0.0005;
+    const url = `https://router.hereapi.com/v8/routes?origin=${lat},${lng}&destination=${destLat},${destLng}&transportMode=car&return=polyline,actions&spans=speedLimit&apiKey=${HERE_API_KEY}`;
+
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.routes && data.routes[0] && data.routes[0].sections && data.routes[0].sections[0].spans) {
+        const spans = data.routes[0].sections[0].spans;
+        if (spans.length > 0 && spans[0].speedLimit) {
+          const ms = spans[0].speedLimit;
+          const mph = Math.round(ms * 2.236936);
+          if (!isNaN(mph) && mph > 0) {
+            console.log(`[HERE API Speed Limit] (${lat}, ${lng}) -> ${mph} MPH`);
+            return mph;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('HERE API fetch error:', e);
+  }
+  return null;
+}
 
 /**
  * Query Google Roads API Speed Limits Endpoint (if unlocked)
@@ -64,56 +102,36 @@ async function fetchGoogleGeocodingLimit(lat, lng) {
     if (response.ok) {
       const data = await response.json();
       if (data.results && data.results.length > 0) {
-        const result = data.results[0];
-        const formatted = (result.formatted_address || '').toLowerCase();
-        
-        let routeName = '';
-        const routeComp = result.address_components?.find(c => c.types.includes('route'));
-        if (routeComp) routeName = routeComp.long_name.toLowerCase();
+        const routeObj = data.results.find(r => r.types.includes('route') || r.types.includes('street_address'));
+        const routeName = (routeObj ? routeObj.formatted_address : data.results[0].formatted_address).toLowerCase();
 
-        // 1. Interstates & Freeways -> 65-70 MPH
-        if (
-          routeName.includes('interstate') || routeName.includes('i-') || 
-          routeName.includes('freeway') || routeName.includes('fwy') || 
-          formatted.includes('interstate')
-        ) {
+        // 1. Interstates & Freeways (I-35, I-20, I-85) -> 65 - 70 MPH
+        if (routeName.includes('i-') || routeName.includes('interstate') || routeName.includes('freeway')) {
           return 65;
         }
 
-        // 2. State Highways, US Highways, & Numbered State Routes (GA 172, US-75, SH-183) -> 55 MPH
-        const isNumberedStateHighway = (
-          routeName.includes('highway') || routeName.includes('hwy') || 
-          routeName.includes('state route') || routeName.includes('state road') || routeName.includes('state hwy') ||
-          routeName.includes('us-') || routeName.includes('sh-') || routeName.includes('sr-') ||
-          routeName.includes('fm-') || routeName.includes('farm to market') ||
-          /\b(ga|tx|ca|fl|ny|nc|sc|va|pa|oh|il|tn|al|ms)\s*\d+/i.test(routeName) ||
-          /\b(ga|tx|ca|fl|ny|nc|sc|va|pa|oh|il|tn|al|ms)\s*\d+/i.test(formatted)
-        );
-
-        if (isNumberedStateHighway) {
-          return 55; // Matches Google Maps 55 MPH sign on GA 172!
+        // 2. State Highways & Numbered Routes (GA 172, US 75, SH 183, FM 1960) -> 55 MPH
+        if (
+          routeName.includes('ga-') || routeName.includes('ga ') || 
+          routeName.includes('hwy') || routeName.includes('highway') || 
+          routeName.includes('us-') || routeName.includes('us ') || 
+          routeName.includes('sh-') || routeName.includes('fm-') || 
+          routeName.includes('route') || routeName.includes('state route')
+        ) {
+          return 55;
         }
 
         // 3. Major Boulevards, Parkways, & Expressways -> 45 MPH
         if (
-          routeName.includes('parkway') || routeName.includes('pkwy') || 
-          routeName.includes('boulevard') || routeName.includes('blvd') ||
-          routeName.includes('expressway') || routeName.includes('bypass')
+          routeName.includes('blvd') || routeName.includes('boulevard') || 
+          routeName.includes('pkwy') || routeName.includes('parkway') || 
+          routeName.includes('expwy') || routeName.includes('expressway')
         ) {
           return 45;
         }
 
-        // 4. Residential Lanes & School Zones -> 25 MPH
-        if (
-          routeName.includes('lane') || routeName.includes('ln') || 
-          routeName.includes('court') || routeName.includes('ct') || 
-          routeName.includes('school') || routeName.includes('woods')
-        ) {
-          return 25; // Matches Google Maps 25 MPH sign on Roy Woods Rd!
-        }
-
-        // 5. Local Roads, Drives, Streets (Della Slaton Rd, Simmons Rd, Human Rd, Oak St) -> 35 MPH
-        return 35; // Matches Google Maps 35 MPH sign on Della Slaton Rd, Simmons Rd, Human Rd!
+        // 4. Local City & County Roads (Della Slaton Rd, Simmons Rd, Human Rd, Oak St) -> 35 MPH
+        return 35;
       }
     }
   } catch (e) {}
@@ -138,12 +156,21 @@ async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
     return cached.speedLimit;
   }
 
+  // Priority #1: HERE Technologies API Speed Limit
+  const hereSpeed = await fetchHereSpeedLimit(lat, lng);
+  if (hereSpeed !== null) {
+    speedCache.set(cacheKey, { speedLimit: hereSpeed, timestamp: Date.now() });
+    return hereSpeed;
+  }
+
+  // Priority #2: Google Roads API Speed Limit
   const googleRoadsSpeed = await fetchGoogleRoadsSpeedLimit(lat, lng);
   if (googleRoadsSpeed !== null) {
     speedCache.set(cacheKey, { speedLimit: googleRoadsSpeed, timestamp: Date.now() });
     return googleRoadsSpeed;
   }
 
+  // Priority #3: Google Geocoding Spatial Classifier
   const googleGeocodeSpeed = await fetchGoogleGeocodingLimit(lat, lng);
   if (googleGeocodeSpeed !== null) {
     speedCache.set(cacheKey, { speedLimit: googleGeocodeSpeed, timestamp: Date.now() });
