@@ -107,9 +107,9 @@ async function fetchLocationIQSpeedLimit(lat, lng) {
         const roadClass = (data.class || '').toLowerCase();
         const displayName = (data.display_name || '').toLowerCase();
 
-        // School Zone / School Road -> 25 MPH
-        if (displayName.includes('school') || displayName.includes('academy') || roadType === 'school') {
-          return 25;
+        // School Zone / School Road -> 20 MPH
+        if (displayName.includes('school') || displayName.includes('academy') || roadType === 'school' || displayName.includes('elementary') || displayName.includes('high school')) {
+          return 20;
         }
 
         // Unpaved / Dirt / Gravel / Track Roads -> 25 MPH
