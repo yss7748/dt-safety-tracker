@@ -293,8 +293,15 @@ async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
 
   const cacheKey = `${lat ? lat.toFixed(4) : 0},${lng ? lng.toFixed(4) : 0}`;
   const cached = speedCache.get(cacheKey);
-  if (cached && (Date.now() - cached.timestamp < 30000)) {
+  // Ultra-Fast Spatial Cache Hit (5-Minute TTL = 300,000ms)
+  if (cached && (Date.now() - cached.timestamp < 300000)) {
     return cached.speedLimit;
+  }
+
+  // Memory Pruning: Keep cache size capped at 2,000 items
+  if (speedCache.size > 2000) {
+    const firstKey = speedCache.keys().next().value;
+    speedCache.delete(firstKey);
   }
 
   // Priority #1: HERE Technologies API Raw Automotive Speed Limit Spans (25 MPH on Cook St / Church St)
