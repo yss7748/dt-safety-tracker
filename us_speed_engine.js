@@ -189,7 +189,7 @@ async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
     return mapboxSpeed;
   }
 
-  return 35;
+  return null;
 }
 
 module.exports = {
