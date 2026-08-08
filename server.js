@@ -55,9 +55,6 @@ app.get('/api/drivers', async (req, res) => {
           }
         }
 
-        // Calculate US Road Speed Limit via USDOT API & Spatial Engine
-        val.roadSpeedLimit = await getUSRoadSpeedLimitAsync(val.lat, val.lng, val.speed, val.settings);
-
         drivers.push({
           ...val,
           lastSeenSecondsAgo
