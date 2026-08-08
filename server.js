@@ -129,7 +129,14 @@ app.post('/api/telemetry', async (req, res) => {
   driver.lng = lng;
   driver.speed = speed;
   driver.heading = heading;
-  driver.status = status;
+
+  // Immediate status transition: If vehicle is moving (> 2 MPH), force status to 'active' or 'violation'
+  if (speed > 2) {
+    driver.status = status === 'violation' ? 'violation' : 'active';
+  } else {
+    driver.status = status || 'break';
+  }
+
   driver.networkStatus = networkStatus || '4g';
   driver.lastTelemetryTime = Date.now();
 
