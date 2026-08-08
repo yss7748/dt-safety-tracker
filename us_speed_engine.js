@@ -181,10 +181,15 @@ async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
     return settings.roadSpeedLimitOverride;
   }
 
+  const cacheKey = `${(lat && typeof lat === 'number') ? lat.toFixed(4) : 0},${(lng && typeof lng === 'number') ? lng.toFixed(4) : 0}`;
+  const cached = speedCache.get(cacheKey);
+  if (cached && (Date.now() - cached.timestamp < 60000)) {
+    return cached.speedLimit;
+  }
+
   // Priority #0: Check Self-Hosted Pre-Loaded Speed Database (0ms Instant / $0.00 Cost)
   const selfHostedSpeed = getSelfHostedSpeedLimit(lat, lng);
   if (selfHostedSpeed !== null) {
-    const cacheKey = `${lat ? lat.toFixed(4) : 0},${lng ? lng.toFixed(4) : 0}`;
     speedCache.set(cacheKey, { speedLimit: selfHostedSpeed, timestamp: Date.now() });
     return selfHostedSpeed;
   }
