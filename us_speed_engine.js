@@ -14,10 +14,54 @@
 const GOOGLE_API_KEY = 'AIzaSyCf8UyxITXAwMGyHJg1oeZ_BoSgAkvoZ1Y';
 const HERE_API_KEY = 'tQAbtOSDyC_ruvTlGZ0eUdBXucVnFLyHV6Glhkbx-lE';
 const TOMTOM_API_KEY = '6hNDEyurATkWloBlTl52vX9oS1Aw7Ue5';
+const LOCATIONIQ_API_KEY = 'pk.895fde3c881a74c99eaf840db17b0c88';
 const speedCache = new Map();
 
 /**
- * Priority #1: Query TomTom Routing API for Raw Speed Limits (75,000 Free/Mo)
+ * Priority #1: Query LocationIQ API for Speed Limits & Geocoding (300,000 Free/Mo)
+ */
+async function fetchLocationIQSpeedLimit(lat, lng) {
+  if (!lat || !lng) return null;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1800);
+
+    const url = `https://us1.locationiq.com/v1/reverse.php?key=${LOCATIONIQ_API_KEY}&lat=${lat}&lon=${lng}&format=json&extra=maxspeed`;
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.extra && data.extra.maxspeed) {
+        let maxspeed = parseInt(data.extra.maxspeed, 10);
+        if (!isNaN(maxspeed) && maxspeed > 0) {
+          if (data.extra.maxspeed.includes('mph')) {
+            return maxspeed;
+          }
+          const mph = Math.round(maxspeed * 0.621371);
+          console.log(`[LocationIQ API Speed Limit] (${lat}, ${lng}) -> ${mph} MPH`);
+          return mph;
+        }
+      }
+      
+      if (data.address && data.address.road) {
+        const routeName = data.address.road.toLowerCase();
+        if (routeName.includes('i-') || routeName.includes('interstate') || routeName.includes('freeway')) return 65;
+        if (routeName.includes('ga-') || routeName.includes('hwy') || routeName.includes('highway') || routeName.includes('us-')) return 55;
+        if (routeName.includes('blvd') || routeName.includes('pkwy') || routeName.includes('expressway')) return 45;
+        if (routeName.includes('lane') || routeName.includes('ln') || routeName.includes('court') || routeName.includes('woods')) return 25;
+        return 35;
+      }
+    }
+  } catch (e) {
+    console.warn('LocationIQ API fetch error:', e);
+  }
+  return null;
+}
+
+/**
+ * Priority #2: Query TomTom Routing API for Raw Speed Limits (75,000 Free/Mo)
  */
 async function fetchTomTomSpeedLimit(lat, lng) {
   if (!lat || !lng) return null;
@@ -194,7 +238,14 @@ async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
     return cached.speedLimit;
   }
 
-  // Priority #1: TomTom API Speed Limit (75,000 Free/Mo)
+  // Priority #1: LocationIQ API Speed Limit (300,000 Free/Mo - 10k/day)
+  const locationIQSpeed = await fetchLocationIQSpeedLimit(lat, lng);
+  if (locationIQSpeed !== null) {
+    speedCache.set(cacheKey, { speedLimit: locationIQSpeed, timestamp: Date.now() });
+    return locationIQSpeed;
+  }
+
+  // Priority #2: TomTom API Speed Limit (75,000 Free/Mo)
   const tomTomSpeed = await fetchTomTomSpeedLimit(lat, lng);
   if (tomTomSpeed !== null) {
     speedCache.set(cacheKey, { speedLimit: tomTomSpeed, timestamp: Date.now() });
