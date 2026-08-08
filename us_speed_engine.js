@@ -12,7 +12,6 @@
  */
 
 const GOOGLE_API_KEY = 'AIzaSyCf8UyxITXAwMGyHJg1oeZ_BoSgAkvoZ1Y';
-const HERE_API_KEY = 'tQAbtOSDyC_ruvTlGZ0eUdBXucVnFLyHV6Glhkbx-lE';
 const TOMTOM_API_KEY = '6hNDEyurATkWloBlTl52vX9oS1Aw7Ue5';
 const LOCATIONIQ_API_KEY = 'pk.895fde3c881a74c99eaf840db17b0c88';
 const MAPBOX_PART1 = 'pk.eyJ1Ijoic2Fpc2FoaXNobnUiLCJhIjoiY21zanU2cmtrMHI1ZzJ5cTVkaXNlc205dSJ9';
@@ -144,114 +143,7 @@ async function fetchTomTomSpeedLimit(lat, lng) {
   return null;
 }
 
-/**
- * Priority #2: Query HERE Technologies Router API for Raw Speed Limits
- */
-async function fetchHereSpeedLimit(lat, lng) {
-  if (!lat || !lng) return null;
-
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 1800);
-
-    const destLat = lat + 0.0005;
-    const destLng = lng + 0.0005;
-    const url = `https://router.hereapi.com/v8/routes?origin=${lat},${lng}&destination=${destLat},${destLng}&transportMode=car&return=polyline,actions&spans=speedLimit&apiKey=${HERE_API_KEY}`;
-
-    const response = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeout);
-
-    if (response.ok) {
-      const data = await response.json();
-      if (data.routes && data.routes[0] && data.routes[0].sections && data.routes[0].sections[0].spans) {
-        const spans = data.routes[0].sections[0].spans;
-        if (spans.length > 0 && spans[0].speedLimit) {
-          const ms = spans[0].speedLimit;
-          const mph = Math.round(ms * 2.236936);
-          if (!isNaN(mph) && mph > 0) {
-            console.log(`[HERE API Speed Limit] (${lat}, ${lng}) -> ${mph} MPH`);
-            return mph;
-          }
-        }
-      }
-    }
-  } catch (e) {
-    console.warn('HERE API fetch error:', e);
-  }
-  return null;
-}
-
-/**
- * Query Google Roads API Speed Limits Endpoint (if unlocked)
- */
-async function fetchGoogleRoadsSpeedLimit(lat, lng) {
-  if (!lat || !lng) return null;
-
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 1500);
-
-    const url = `https://roads.googleapis.com/v1/speedLimits?path=${lat},${lng}&key=${GOOGLE_API_KEY}`;
-    const response = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeout);
-
-    if (response.ok) {
-      const data = await response.json();
-      if (data.speedLimits && data.speedLimits.length > 0) {
-        const item = data.speedLimits[0];
-        if (item.speedLimit) {
-          let limit = parseInt(item.speedLimit, 10);
-          if (item.units === 'KPH') {
-            limit = Math.round(limit * 0.621371);
-          }
-          if (!isNaN(limit) && limit > 0) {
-            return limit;
-          }
-        }
-      }
-    }
-  } catch (e) {}
-  return null;
-}
-
-/**
- * 100% Precision Spatial Resolver using Google Geocoding API
- */
-
-
-function getLocalUSRoadSpeedLimit(lat, lng, speed = 0, settings = null) {
-  if (settings && settings.roadSpeedLimitOverride && settings.roadSpeedLimitOverride > 0) {
-    return settings.roadSpeedLimitOverride;
-  }
-  return 35;
-}
-
-async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
-  if (settings && settings.roadSpeedLimitOverride && settings.roadSpeedLimitOverride > 0) {
-    return settings.roadSpeedLimitOverride;
-  }
-
-  const cacheKey = `${lat ? lat.toFixed(4) : 0},${lng ? lng.toFixed(4) : 0}`;
-  const cached = speedCache.get(cacheKey);
-  // Fast 10-Second Speed Limit Refresh (Re-checks live API every 10 seconds along the road)
-  if (cached && (Date.now() - cached.timestamp < 10000)) {
-    return cached.speedLimit;
-  }
-
-  // Memory Pruning: Keep cache size capped at 2,000 items
-  if (speedCache.size > 2000) {
-    const firstKey = speedCache.keys().next().value;
-    speedCache.delete(firstKey);
-  }
-
-  // Priority #1: HERE Technologies API Raw Automotive Speed Limit Spans (25 MPH on Cook St / Church St)
-  const hereSpeed = await fetchHereSpeedLimit(lat, lng);
-  if (hereSpeed !== null) {
-    speedCache.set(cacheKey, { speedLimit: hereSpeed, timestamp: Date.now() });
-    return hereSpeed;
-  }
-
-  // Priority #2: LocationIQ API Speed Limit
+  // Priority #1: LocationIQ / OpenStreetMap API Speed Limit
   const locationIQSpeed = await fetchLocationIQSpeedLimit(lat, lng);
   if (locationIQSpeed !== null) {
     speedCache.set(cacheKey, { speedLimit: locationIQSpeed, timestamp: Date.now() });
