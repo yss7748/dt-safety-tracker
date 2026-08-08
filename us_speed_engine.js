@@ -160,7 +160,7 @@ function loadSelfHostedSpeedDb() {
 loadSelfHostedSpeedDb();
 
 function getSelfHostedSpeedLimit(lat, lng) {
-  if (!lat || !lng) return null;
+  if (!lat || !lng || typeof lat !== 'number' || typeof lng !== 'number' || isNaN(lat) || isNaN(lng)) return null;
   const gridKey = `${lat.toFixed(3)},${lng.toFixed(3)}`;
   const val = selfHostedSpeedDb[gridKey];
   if (val !== undefined && val !== null) {
