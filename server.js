@@ -50,7 +50,10 @@ app.get('/api/speed-at-point', async (req, res) => {
   let googleAddress = 'Google Maps Data';
   let googleRoadName = '';
   try {
-    const googleRes = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=AIzaSyCf8UyxITXAwMGyHJg1oeZ_BoSgAkvoZ1Y`);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1500);
+    const googleRes = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=AIzaSyCf8UyxITXAwMGyHJg1oeZ_BoSgAkvoZ1Y`, { signal: controller.signal });
+    clearTimeout(timeout);
     if (googleRes.ok) {
       const gData = await googleRes.json();
       if (gData.results && gData.results.length > 0) {
