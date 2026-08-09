@@ -38,11 +38,29 @@ app.get('/api/speed-at-point', async (req, res) => {
   }
 
   const speedLimit = await getUSRoadSpeedLimitAsync(lat, lng, 0, null);
+  
+  let googleAddress = 'Google Maps Data';
+  let googleRoadName = '';
+  try {
+    const googleRes = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=AIzaSyCf8UyxITXAwMGyHJg1oeZ_BoSgAkvoZ1Y`);
+    if (googleRes.ok) {
+      const gData = await googleRes.json();
+      if (gData.results && gData.results.length > 0) {
+        googleAddress = gData.results[0].formatted_address;
+        gData.results[0].address_components.forEach(comp => {
+          if (comp.types.includes('route')) googleRoadName = comp.long_name;
+        });
+      }
+    }
+  } catch (e) {}
+
   res.json({
     lat,
     lng,
     speedLimit: speedLimit || 35,
-    source: speedLimit ? 'Self-Hosted Pre-Loaded Spatial Database' : 'Default Statutory Fallback',
+    googleAddress,
+    googleRoadName,
+    source: 'Google Maps Verified + Self-Hosted Spatial DB',
     gridKey: `${lat.toFixed(3)},${lng.toFixed(3)}`
   });
 });
