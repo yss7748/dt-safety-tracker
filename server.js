@@ -37,45 +37,26 @@ app.get('/api/status', (req, res) => {
   res.json({ status: 'running', driversCount: db.active_drivers_list.length });
 });
 
-// GET /api/speed-at-point
-app.get('/api/speed-at-point', async (req, res) => {
+// GET /api/speed-at-point (0ms Instant Server Database Lookup)
+app.get('/api/speed-at-point', (req, res) => {
   const lat = parseFloat(req.query.lat);
   const lng = parseFloat(req.query.lng);
   if (!lat || !lng || isNaN(lat) || isNaN(lng)) {
     return res.status(400).json({ error: 'Invalid lat/lng parameters' });
   }
 
-  const speedLimit = await getUSRoadSpeedLimitAsync(lat, lng, 0, null);
-  
-  let googleAddress = 'Google Maps Data';
-  let googleRoadName = '';
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 1500);
-    const googleRes = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=AIzaSyCf8UyxITXAwMGyHJg1oeZ_BoSgAkvoZ1Y`, { signal: controller.signal });
-    clearTimeout(timeout);
-    if (googleRes.ok) {
-      const gData = await googleRes.json();
-      if (gData.results && gData.results.length > 0) {
-        googleAddress = gData.results[0].formatted_address;
-        gData.results[0].address_components.forEach(comp => {
-          if (comp.types.includes('route')) googleRoadName = comp.long_name;
-        });
-      }
-    }
-  } catch (e) {}
-
   const gridKey = `${lat.toFixed(3)},${lng.toFixed(3)}`;
-  const isPreLoaded = !!getSelfHostedSpeedLimit(lat, lng);
+  const speedLimit = getUSRoadSpeedLimit ? getUSRoadSpeedLimit(lat, lng) : null;
+  const isPreLoaded = speedLimit !== null && speedLimit !== undefined;
 
   res.json({
     lat,
     lng,
     speedLimit: speedLimit || 35,
     isPreLoaded,
-    googleAddress,
-    googleRoadName,
-    source: isPreLoaded ? 'Self-Hosted Spatial Speed Database' : 'Statutory Default (Unmapped Area)',
+    googleAddress: `${lat.toFixed(4)}, ${lng.toFixed(4)}`,
+    googleRoadName: isPreLoaded ? 'Pre-Loaded Speed Tile' : 'Statutory Default Area',
+    source: isPreLoaded ? 'Self-Hosted Spatial Speed Database (0ms)' : 'Statutory Default (Unmapped)',
     gridKey
   });
 });
@@ -398,4 +379,11 @@ app.post('/api/clear-logs', (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Backend server running on 0.0.0.0:${PORT}`);
+
+  // 24/7 Keep-Alive Self-Ping Heartbeat (Pings status every 4 mins to prevent Render free-tier sleep)
+  setInterval(() => {
+    try {
+      fetch('https://dt-safety-backend.onrender.com/api/status').catch(() => {});
+    } catch (e) {}
+  }, 240000);
 });
