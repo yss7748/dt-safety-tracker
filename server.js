@@ -2,6 +2,14 @@ const express = require('express');
 const cors = require('cors');
 const { getUSRoadSpeedLimit, getUSRoadSpeedLimitAsync } = require('./us_speed_engine');
 
+process.on('uncaughtException', (err) => {
+  console.error('CRITICAL: Uncaught Exception caught safely:', err.message, err.stack);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('CRITICAL: Unhandled Rejection caught safely:', reason);
+});
+
 const app = express();
 const PORT = process.env.PORT || 10000;
 
