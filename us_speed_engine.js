@@ -178,7 +178,11 @@ function getLocalUSRoadSpeedLimit(lat, lng, speed = 0, settings = null) {
   if (settings && settings.roadSpeedLimitOverride && settings.roadSpeedLimitOverride > 0) {
     return settings.roadSpeedLimitOverride;
   }
-  return 35;
+  const selfHosted = getSelfHostedSpeedLimit(lat, lng);
+  if (selfHosted !== null && selfHosted !== undefined) {
+    return selfHosted;
+  }
+  return null;
 }
 
 async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
