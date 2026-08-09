@@ -192,8 +192,8 @@ app.post('/api/telemetry', async (req, res) => {
   driver.networkStatus = networkStatus || '4g';
   driver.lastTelemetryTime = Date.now();
 
-  // Calculate Road Speed Limit using official USDOT GIS API & Spatial Engine
-  driver.roadSpeedLimit = await getUSRoadSpeedLimitAsync(lat, lng, speed, driver.settings);
+  // Calculate Road Speed Limit using 0ms Instant Server Spatial Database
+  driver.roadSpeedLimit = getUSRoadSpeedLimit ? (getUSRoadSpeedLimit(lat, lng, speed, driver.settings) || 35) : 35;
 
   if (violations) {
     driver.violations = {
