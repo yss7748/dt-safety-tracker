@@ -54,14 +54,18 @@ app.get('/api/speed-at-point', async (req, res) => {
     }
   } catch (e) {}
 
+  const gridKey = `${lat.toFixed(3)},${lng.toFixed(3)}`;
+  const isPreLoaded = !!getSelfHostedSpeedLimit(lat, lng);
+
   res.json({
     lat,
     lng,
     speedLimit: speedLimit || 35,
+    isPreLoaded,
     googleAddress,
     googleRoadName,
-    source: 'Google Maps Verified + Self-Hosted Spatial DB',
-    gridKey: `${lat.toFixed(3)},${lng.toFixed(3)}`
+    source: isPreLoaded ? 'Self-Hosted Spatial Speed Database' : 'Statutory Default (Unmapped Area)',
+    gridKey
   });
 });
 
