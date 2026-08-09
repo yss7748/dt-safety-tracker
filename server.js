@@ -29,6 +29,24 @@ app.get('/api/status', (req, res) => {
   res.json({ status: 'running', driversCount: db.active_drivers_list.length });
 });
 
+// GET /api/speed-at-point
+app.get('/api/speed-at-point', async (req, res) => {
+  const lat = parseFloat(req.query.lat);
+  const lng = parseFloat(req.query.lng);
+  if (!lat || !lng || isNaN(lat) || isNaN(lng)) {
+    return res.status(400).json({ error: 'Invalid lat/lng parameters' });
+  }
+
+  const speedLimit = await getUSRoadSpeedLimitAsync(lat, lng, 0, null);
+  res.json({
+    lat,
+    lng,
+    speedLimit: speedLimit || 35,
+    source: speedLimit ? 'Self-Hosted Pre-Loaded Spatial Database' : 'Default Statutory Fallback',
+    gridKey: `${lat.toFixed(3)},${lng.toFixed(3)}`
+  });
+});
+
 // GET /api/drivers
 app.get('/api/drivers', async (req, res) => {
   const drivers = [];
