@@ -37,8 +37,8 @@ app.get('/api/status', (req, res) => {
   res.json({ status: 'running', driversCount: db.active_drivers_list.length });
 });
 
-// GET /api/speed-at-point (0ms Instant Server Database Lookup)
-app.get('/api/speed-at-point', (req, res) => {
+// GET /api/speed-at-point (0ms Pre-Loaded Cache + Dynamic GIS Live Resolver)
+app.get('/api/speed-at-point', async (req, res) => {
   const lat = parseFloat(req.query.lat);
   const lng = parseFloat(req.query.lng);
   if (!lat || !lng || isNaN(lat) || isNaN(lng)) {
@@ -46,8 +46,10 @@ app.get('/api/speed-at-point', (req, res) => {
   }
 
   const gridKey = `${lat.toFixed(3)},${lng.toFixed(3)}`;
-  const speedLimit = getUSRoadSpeedLimit ? getUSRoadSpeedLimit(lat, lng) : null;
-  const isPreLoaded = speedLimit !== null && speedLimit !== undefined;
+  const preLoaded = getUSRoadSpeedLimit ? getUSRoadSpeedLimit(lat, lng) : null;
+  const isPreLoaded = preLoaded !== null && preLoaded !== undefined;
+
+  const speedLimit = await getUSRoadSpeedLimitAsync(lat, lng, 0, null);
 
   res.json({
     lat,
@@ -55,8 +57,8 @@ app.get('/api/speed-at-point', (req, res) => {
     speedLimit: speedLimit || 35,
     isPreLoaded,
     googleAddress: `${lat.toFixed(4)}, ${lng.toFixed(4)}`,
-    googleRoadName: isPreLoaded ? 'Pre-Loaded Speed Tile' : 'Statutory Default Area',
-    source: isPreLoaded ? 'Self-Hosted Spatial Speed Database (0ms)' : 'Statutory Default (Unmapped)',
+    googleRoadName: isPreLoaded ? 'Pre-Loaded Speed Database' : 'Live GIS / LocationIQ Resolved',
+    source: isPreLoaded ? 'Self-Hosted Spatial Speed Database (0ms)' : 'Live USDOT / OpenStreetMap Engine',
     gridKey
   });
 });
