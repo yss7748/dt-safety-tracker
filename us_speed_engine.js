@@ -13,7 +13,7 @@
 
 const GOOGLE_API_KEY = 'AIzaSyCf8UyxITXAwMGyHJg1oeZ_BoSgAkvoZ1Y';
 const TOMTOM_API_KEY = '6hNDEyurATkWloBlTl52vX9oS1Aw7Ue5';
-const LOCATIONIQ_API_KEY = 'pk.0b9919f182eaac6bb5cd6cd7c0e86bdf';
+const LOCATIONIQ_API_KEY = 'pk.895fde3c881a74c99eaf840db17b0c88';
 const GEOAPIFY_API_KEY = '0cd83e0607e6493880ea3e57b1d0ead3';
 const MAPBOX_PART1 = 'pk.eyJ1Ijoic2Fpc2FoaXNobnUiLCJhIjoiY21zanU2cmtrMHI1ZzJ5cTVkaXNlc205dSJ9';
 const MAPBOX_PART2 = 'Y7uMlvsfyk0M_YguSb7mlw';
