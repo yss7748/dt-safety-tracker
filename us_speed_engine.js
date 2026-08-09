@@ -199,26 +199,29 @@ async function getUSRoadSpeedLimitAsync(lat, lng, speed = 0, settings = null) {
     return selfHostedSpeed;
   }
 
-  // Priority #1: LocationIQ / OpenStreetMap API Speed Limit
-  const locationIQSpeed = await fetchLocationIQSpeedLimit(lat, lng);
-  if (locationIQSpeed !== null) {
-    speedCache.set(cacheKey, { speedLimit: locationIQSpeed, timestamp: Date.now() });
-    return locationIQSpeed;
-  }
+  // Priority #1, #2, #3: External API Fallback Chain with 1.2s Hard Timeout
+  try {
+    const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 1200));
 
-  // Priority #2: TomTom API Speed Limit
-  const tomTomSpeed = await fetchTomTomSpeedLimit(lat, lng);
-  if (tomTomSpeed !== null) {
-    speedCache.set(cacheKey, { speedLimit: tomTomSpeed, timestamp: Date.now() });
-    return tomTomSpeed;
-  }
+    const apiPromise = (async () => {
+      const locationIQSpeed = await fetchLocationIQSpeedLimit(lat, lng);
+      if (locationIQSpeed !== null) return locationIQSpeed;
 
-  // Priority #3: Mapbox API Speed Limit & Matching
-  const mapboxSpeed = await fetchMapboxSpeedLimit(lat, lng);
-  if (mapboxSpeed !== null) {
-    speedCache.set(cacheKey, { speedLimit: mapboxSpeed, timestamp: Date.now() });
-    return mapboxSpeed;
-  }
+      const tomTomSpeed = await fetchTomTomSpeedLimit(lat, lng);
+      if (tomTomSpeed !== null) return tomTomSpeed;
+
+      const mapboxSpeed = await fetchMapboxSpeedLimit(lat, lng);
+      if (mapboxSpeed !== null) return mapboxSpeed;
+
+      return null;
+    })();
+
+    const resolvedSpeed = await Promise.race([apiPromise, timeoutPromise]);
+    if (resolvedSpeed !== null) {
+      speedCache.set(cacheKey, { speedLimit: resolvedSpeed, timestamp: Date.now() });
+      return resolvedSpeed;
+    }
+  } catch (e) {}
 
   return null;
 }
