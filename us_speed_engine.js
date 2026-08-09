@@ -148,16 +148,21 @@ const DB_FILE = path.join(__dirname, 'speed_limits_db.json');
 let selfHostedSpeedDb = {};
 
 function loadSelfHostedSpeedDb() {
-  if (fs.existsSync(DB_FILE)) {
-    try {
+  try {
+    if (fs.existsSync(DB_FILE)) {
       selfHostedSpeedDb = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
       console.log(`Loaded self-hosted speed DB with ${Object.keys(selfHostedSpeedDb).length} pre-loaded road tiles.`);
-    } catch (e) {
-      console.warn('Failed to parse speed_limits_db.json:', e);
     }
+  } catch (e) {
+    console.warn('Warning loading speed_limits_db.json:', e.message);
+    selfHostedSpeedDb = {};
   }
 }
-loadSelfHostedSpeedDb();
+try {
+  loadSelfHostedSpeedDb();
+} catch (e) {
+  console.warn('Self-hosted speed DB deferred load warning:', e.message);
+}
 
 function getSelfHostedSpeedLimit(lat, lng) {
   if (!lat || !lng || typeof lat !== 'number' || typeof lng !== 'number' || isNaN(lat) || isNaN(lng)) return null;
